@@ -1,0 +1,103 @@
+% KOMMANDOER
+\def \t {\cdot}
+\def \np {\newpage}
+\def \q {\quad}
+\def \ra {\rightarrow}
+\def \imps {\Rightarrow}
+\def \iffqq {\iff \qquad}
+\def \impsqq {\implies \qquad}
+\def \impdqq {\impliedby \qquad}
+\def \kl {\text{kl}}
+\def \d {\partial}
+\def \X {\mathcal{X}}
+\def \dvc {d_\text{VC}}
+\def \dvch {d_\text{VC}(\mathcal{H})}
+
+\newcommand\hash{\scalebox{1.2}{\raisebox{0ex}{\#}}}
+\newcommand{\B} {\mathcal{B}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Oh}{\mathcal{O}}
+\renewcommand{\H}{\mathcal{H}}
+\newcommand{\Y}{\mathcal{Y}}
+\newcommand{\E}[1]{\mathbb{E}\brks{#1}}
+\newcommand{\Esub}[2]{\mathbb{E}_#1\brks{#2}}
+\renewcommand{\P}[1]{\mathbb{P}\parr{#1}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\KL}[2]{\text{KL}\parr{#1 || #2}}
+%\newcommand{\C}{\mathbb{C}}
+
+\newcommand{\set}[1]{\left \{#1\right\}}
+\newcommand{\abs}[1]{\left\vert #1 \right\vert}
+\newcommand{\norm}[1]{\lVert #1 \rVert}
+\newcommand{\parr}[1]{\left( #1 \right)}
+\newcommand{\brks}[1]{\left[ #1 \right]}
+
+\newcommand{\dotp}[1]{\langle #1 \rangle}
+\newcommand{\amin}[1]{\underset{#1}{\text{argmin}}}
+\newcommand{\amax}[1]{\underset{#1}{\text{argmax}}}
+\newcommand{\m}[1]{\begin{pmatrix}#1\end{pmatrix}}
+\newcommand{\ita}[1]{\textit{#1}}
+\newcommand{\ms}[1]{\texttt{#1}}
+\newcommand{\fat}[1]{\text{\boldmath$#1$}}
+\newcommand{\qed}{\hfill\square}
+\newcommand{\diff}[1]{\frac{d}{d{#1}}}
+\newcommand{\pdiff}[1]{\frac{\d}{\d{#1}}}
+\newcommand{\pdiffpow}[2]{\frac{\d^{#2}}{\d{#1}^{#2}}}
+
+% independence (indp is the command)
+\newcommand\indp{\protect\mathpalette{\protect\independenT}{\perp}}
+\def\independen#1#2{\mathrel{\rlap{$#1#2$}\mkern2mu{#1#2}}}
+
+\providecommand{\ceil}[1]{\left \lceil #1 \right \rceil }
+\providecommand{\floor}[1]{\left \lfloor #1 \right \rfloor }
+
+\newcommand{\minover}[1]{\underset{#1}{\min}}
+\newcommand{\maxover}[1]{\underset{#1}{\max}}
+\newcommand{\supover}[1]{\underset{#1}{\sup}}
+
+% Load the listings package
+\usepackage{listings}
+
+% Definition of a style for code, matter of taste
+\lstdefinestyle{mystyle}{
+  language=Python,
+  basicstyle=\ttfamily\footnotesize,
+  % backgroundcolor=\color[HTML]{F7F7F7},
+  % rulecolor=\color[HTML]{EEEEEE},
+  % identifierstyle=\color[HTML]{24292E},
+  % emphstyle=\color[HTML]{005CC5},
+  % keywordstyle=\color[HTML]{D73A49},
+  % commentstyle=\color[HTML]{6A737D},
+  % stringstyle=\color[HTML]{032F62},
+  emph={@property,self,range,True,False},
+  morekeywords={super,with,as,lambda},
+  % literate=%
+  %   {+}{{{\color[HTML]{D73A49}+}}}1
+  %   {-}{{{\color[HTML]{D73A49}-}}}1
+  %   {*}{{{\color[HTML]{D73A49}*}}}1
+  %   {/}{{{\color[HTML]{D73A49}/}}}1
+  %   {=}{{{\color[HTML]{D73A49}=}}}1
+  %   {/=}{{{\color[HTML]{D73A49}=}}}1,
+  breakatwhitespace=false,
+  breaklines=true,
+  captionpos=b,
+  keepspaces=true,
+  numbers=none,
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  tabsize=4,
+  frame=single,
+  xleftmargin=\parindent,
+  framexleftmargin=\parindent
+}
+
+% Apply the style globally
+\lstset{style=mystyle}
+
+\sloppy
+\makeatletter
+\makeatother

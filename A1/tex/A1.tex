@@ -1,0 +1,71 @@
+\documentclass{article}
+
+\input{utils/def_command.tex}
+\input{utils/package_import.tex}
+
+% Add margin adjustments
+\usepackage[margin=1in]{geometry}  % Reduced margins
+\usepackage{titling}
+
+% Make title inline and right-aligned
+\pretitle{\begin{flushright}\large}
+\posttitle{: }  % Just a colon and space after title
+\preauthor{}    % No special formatting for author
+\postauthor{, } % Comma and space after author
+\predate{}      % No special formatting for date
+\postdate{\end{flushright}}  % End the right alignment after date
+\setlength{\droptitle}{-4em}  % Reduce space before title
+
+% Reduce title spacing
+\pretitle{\begin{center}\large}
+\posttitle{\end{center}\vspace{-1em}}  % Reduce space after title
+\preauthor{\begin{center}\normalsize}
+\postauthor{\end{center}\vspace{-3em}}  % Reduce space after author
+\predate{\begin{center}\normalsize}
+\postdate{\end{center}\vspace{-0.5em}}  % Reduce space after date
+
+% Add section formatting adjustments
+\usepackage{titlesec}
+\titleformat*{\section}{\large\bfseries}  % Make section headers large and bold
+\titlespacing{\section}{0pt}{1em}{0.5em}  % Reduce spacing before and after section headers
+
+\begin{document}
+\title{DM887 Assignment 1: River Swim}
+\author{Victor Kaplan Kjellerup (vikje24)}
+\date{}  % Add this line to prevent date from being printed
+\maketitle
+
+\section*{Can my algorithm solve the task}
+I implemented the ``Online MBRL'' algorithm from ``Slides 3, Model Based RL'' with \lstinline|R-MAX| as MDP constructor and policy iteration (PI) as DP solver with two stochastic modifications (explained below). I set \(m=25, \gamma=0.95, \text{episode lenght} = 2000, \text{ and } R_\text{max} = 1\) and defined \(T := |S|+1\), \(S\) being the state space.
+
+I interpret ``solve the task'' to mean learning a policy which maximizes the expected reward. The always-right policy was clearly optimal since the problem is non-episodic and there is a non-zero probability of reaching large reward at the right end of the river. \(\gamma=0.95\) was set largely enough for the information about the high rewards on the right not to be discounted. Even when \(T=20\), \(V^*\) still favored right to left in \(s_1\) (and progressively more so for higher states). Figure~\ref{fig:learning_curves} shows that my algorithm was able to reach right side of the river in all \(4 \times 5\) experiments with final rewards \(\approx 500\) (were the right side of the river not found, the final reward would be at most \(\nicefrac{5}{1000} \times 2000 = 10\)).
+
+I required two things for the algorithm to terminate. 1: The agent had reached the right side of the river or, formally, the smallest reward of the last five iterations was larger than \(5\times\) the total reward of an always-left policy, and 2: The learning had converged or, formally, the best-yet tail-average had not been updated for five iterations. By tail average, I mean the average total reward of the last five iterations.
+
+\section*{Exploration/exploitation}
+\lstinline|R-max| initially assumes that any \((s,a)\) pair realized less than \(m\) times, gives maximal reward. This tempting possibility is therefore attempted at least \(m\) times for each state, gathering data for the state transition probability matrix \(\hat{P}\). After the exploration phase (a gradual shift of course), the algorithm will act optimally, based on \(\hat{P}\) and exploit as much as possible. In River Swim, each action not fully explored (including ``right''-actions) will seem more valuable than any explored option going left, and once the right side of the river is reached and exploration is fully over, the agent will know that the highest rewards are found by swimming right.
+
+I added two stochastic modifications, adding noise both during PI and choice of actions. During PI, I added a random term \(\nicefrac{u}{i}\) to \(Q(s,a)\) where \(u \sim U(-1, 1)\) and \(i\) the iteration index. During simulation, I implemented a \(\nicefrac{1}{\parr{(i+2)^\frac{35-T}{15}}}\) probability of flipping the determined action such that randomness for longer rivers with more to explore would decrease slower. Both these modifications increased exploration in early iterations while converging to a deterministic policy eventually which is better for exploitation. My modifications reduced conversion time markedly.
+
+The only event that could permanently prevent the agent from winning (disregarding my stochastic modifications) is when the action ``right'' is chosen \(m' \ge m\) times in some state \(s_j\) without ever moving the agent to the right. In this case the \((s,a)\) pair will appear explored, and it will seem certain that moving right from \(s_j\) leads nowhere (or leftwards), so the agent will never attempt to do this again, and thus \(s_j\) blocks the river. For any \(s_j, j=1,\ldots,21\), the probability of \ita{not} moving right on action ``right'' is at most 0.65, so the joint probability of this happening \(m'\) times is at most \(0.65^{m'} \le 0.65^m \le 0.000022\). The probability of \textit{none} of the states blocking the river this way is therefore at least \((1-0.000022)^{T+1} \le (1-0.000022)^{21} \approx 0.9995\), so eventual success is almost certain.
+
+\section*{Convergence time}
+I am asked to locate ``the time step after which the learning curve flattens''. Since the individual simulations' learning curves flatten at different times, the flattening of their average depends on the last simulation to succeed. My stopping criterion is imperfect and susceptible to randomness, so I used visual judgement to estimate the ``flattening point'' of the average learning curve to be 12, 31, 70, 90 for \(T=5, 10, 15, 20\), respectively. Performing linear regression, this leads to \(R^2=0.9799\), indicating that the complexity is plausibly linear, but the simulations show high variance, so more repetitions would be warranted.
+
+\clearpage
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{figures/learning_curve.png}
+    \caption{Learning curves for five runs for each river length \(T = 5, 10, 15, 20\). Colored curves depict each simulation and black curves are simulation averages. After each simulation's stopping point, its remaining total reward values (used for average calculation) are defined as the average of its last five values. This way, the (black) average is always of five observations. The dotted vertical lines describe the iteration at which each simulation reached the optimal always-right policy.}
+    \label{fig:learning_curves}
+\end{figure}
+
+\clearpage
+\section*{References}
+I used language model aid in two different ways.
+\begin{enumerate}
+    \item I prompted chatGPT-4o liberally with conceptual questions about theory and algorithmic choices, such as how to choose a suitable stopping criterion, how to best display learning curves etc. One example question I asked: ``I'm told that since it is non-episodic, I should find a stopping criterion. Do you think they mean stop swimming or stop improving agent?''
+    \item I used the built-in language model of the Cursor text editor. Cursor has an LM with access to my code base. I use it to finish lines, write short code snippets, find bugs etc. I used these features liberally throughout my work. For instance, it was helpful with implementing parallelization and plotting, file I/O, \lstinline|numpy| and LaTeX syntax, and finding performance boosts.
+\end{enumerate}
+
+\end{document}
