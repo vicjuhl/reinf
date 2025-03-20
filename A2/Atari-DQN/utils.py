@@ -27,8 +27,10 @@ def process_image(image, crop_size=(34,194,0,160),target_size=(84,84),normalize=
         return frame
 
 
-Transition = namedtuple('Transition',
-                        ('state', 'action', 'next_state', 'reward', 'done'))
+Transition = namedtuple(
+    'Transition',
+    ('state', 'action', 'p_action', 'next_state', 'reward', 'done')
+)
 
 class ReplayMemory:
     def __init__(self, capacity):

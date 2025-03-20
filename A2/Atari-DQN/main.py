@@ -24,7 +24,11 @@ parser.add_argument('--epoch', default=10001, type=int, help="training epoch")
 parser.add_argument('--batch-size', default=32, type=int, help="batch size")
 parser.add_argument('--ddqn',action='store_true', help="double dqn/dueldqn")
 parser.add_argument('--eval-cycle', default=500, type=int, help="evaluation cycle")
+parser.add_argument('--continue-from', type=int, help="epoch number to continue from")
+parser.add_argument('--model-path', type=str, help="path to saved model")
 args = parser.parse_args()
+
+device = "cpu"
 
 # some hyperparameters
 GAMMA = 0.99 # bellman function
@@ -47,15 +51,22 @@ def select_action(state:torch.Tensor)->torch.Tensor:
     '''
     global eps_threshold
     global steps_done
+    global n_action
+    global device
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
         math.exp(-1. * steps_done / EPS_DECAY)
     steps_done += 1
+    a_determ = policy_net(state).max(1)[1].view(1, 1)
     if sample > eps_threshold:
         with torch.no_grad():
-            return policy_net(state).max(1)[1].view(1, 1)
+            p_a = (1 - eps_threshold) + eps_threshold / n_action
+            a = a_determ
     else:
-        return torch.tensor([[env.action_space.sample()]]).to(args.gpu)
+        a = torch.tensor([[env.action_space.sample()]]).to(device)
+        p_a = eps_threshold / n_action
+    print(a, torch.tensor(p_a, device=device))
+    return a, torch.tensor([p_a], device=device)
 
 
 # environment
@@ -84,15 +95,24 @@ log_path = os.path.join(log_dir,"log.txt")
 video = VideoRecorder(log_dir)
 
 # create network and target network
-if args.model == "dqn":
-    policy_net = DQN(in_channels=4, n_actions=n_action).to(args.gpu)
-    target_net = DQN(in_channels=4, n_actions=n_action).to(args.gpu)
+if args.continue_from is not None and args.model_path is not None:
+    if not os.path.exists(args.model_path):
+        raise FileNotFoundError(f"Model file not found: {args.model_path}")
+    print(f"Loading model from {args.model_path}")
+    try:
+        policy_net = torch.load(args.model_path, weights_only=False, map_location=torch.device('cpu')).to(device)
+        target_net = torch.load(args.model_path, weights_only=False, map_location=torch.device('cpu')).to(device)
+        steps_done = args.continue_from * 1000  # Approximate steps based on epochs
+    except Exception as e:
+        raise Exception(f"Error loading model from {args.model_path}: {str(e)}")
 else:
-    policy_net = DuelDQN(in_channels=4, n_actions=n_action).to(args.gpu)
-    target_net = DuelDQN(in_channels=4, n_actions=n_action).to(args.gpu)
-# let target model = model
-target_net.load_state_dict(policy_net.state_dict())
-target_net.eval()
+    if args.model == "dqn":
+        policy_net = DQN(in_channels=4, n_actions=n_action).to(device)
+        target_net = DQN(in_channels=4, n_actions=n_action).to(device)
+    else:
+        policy_net = DuelDQN(in_channels=4, n_actions=n_action).to(device)
+        target_net = DuelDQN(in_channels=4, n_actions=n_action).to(device)
+    target_net.load_state_dict(policy_net.state_dict())
 
 # replay memory
 memory = ReplayMemory(50000)
@@ -105,26 +125,27 @@ print("Warming up...")
 warmupstep = 0
 for epoch in count():
     obs, info = env.reset() # (84,84)
-    obs = torch.from_numpy(obs).to(args.gpu) #(84,84)
+    obs = torch.from_numpy(obs).to(device) #(84,84)
     # stack four frames together, hoping to learn temporal info
     obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0) #(1,4,84,84)
 
+    p_action = torch.tensor([1 / n_action], device=device) # No ε yet, so always p(a|s) = 1 / |A|.
     # step loop
     for step in count():
         warmupstep += 1
         # take one step
-        action = torch.tensor([[env.action_space.sample()]]).to(args.gpu)
+        action = torch.tensor([[env.action_space.sample()]]).to(device)
         next_obs, reward, terminated, truncated, info = env.step(action.item())
         done = terminated or truncated
         
         # convert to tensor
-        reward = torch.tensor([reward],device=args.gpu) # (1)
-        done = torch.tensor([done],device=args.gpu) # (1)
-        next_obs = torch.from_numpy(next_obs).to(args.gpu) # (84,84)
+        reward = torch.tensor([reward],device=device) # (1)
+        done = torch.tensor([done],device=device) # (1)
+        next_obs = torch.from_numpy(next_obs).to(device) # (84,84)
         next_obs = torch.stack((next_obs,obs[0][0],obs[0][1],obs[0][2])).unsqueeze(0) # (1,4,84,84)
         
         # store the transition in memory
-        memory.push(obs,action,next_obs,reward,done)
+        memory.push(obs,action,p_action,next_obs,reward,done)
         
         # move to next state
         obs = next_obs
@@ -142,9 +163,10 @@ lossdeq = deque([],maxlen=100)
 avgrewardlist = []
 avglosslist = []
 # epoch loop 
-for epoch in range(args.epoch):
+start_epoch = args.continue_from if args.continue_from is not None else 0
+for epoch in range(start_epoch, args.epoch):
     obs, info = env.reset() # (84,84)
-    obs = torch.from_numpy(obs).to(args.gpu) #(84,84)
+    obs = torch.from_numpy(obs).to(device) #(84,84)
     # stack four frames together, hoping to learn temporal info
     obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0) #(1,4,84,84)
 
@@ -154,19 +176,19 @@ for epoch in range(args.epoch):
     # step loop
     for step in count():
         # take one step
-        action = select_action(obs)
+        action, p_action = select_action(obs)
         next_obs, reward, terminated, truncated, info = env.step(action.item())
         total_reward += reward
         done = terminated or truncated
         
         # convert to tensor
-        reward = torch.tensor([reward],device=args.gpu) # (1)
-        done = torch.tensor([done],device=args.gpu) # (1)
-        next_obs = torch.from_numpy(next_obs).to(args.gpu) # (84,84)
+        reward = torch.tensor([reward],device=device) # (1)
+        done = torch.tensor([done],device=device) # (1)
+        next_obs = torch.from_numpy(next_obs).to(device) # (84,84)
         next_obs = torch.stack((next_obs,obs[0][0],obs[0][1],obs[0][2])).unsqueeze(0) # (1,4,84,84)
         
         # store the transition in memory
-        memory.push(obs,action,next_obs,reward,done)
+        memory.push(obs,action,p_action,next_obs,reward,done)
         
         # move to next state
         obs = next_obs
@@ -178,6 +200,9 @@ for epoch in range(args.epoch):
         state_batch = torch.cat(batch.state) # (bs,4,84,84)
         next_state_batch = torch.cat(batch.next_state) # (bs,4,84,84)
         action_batch = torch.cat(batch.action) # (bs,1)
+        p_action_batch = torch.cat(batch.p_action) # (bs,1)
+        print(action_batch)
+        print(p_action_batch)
         reward_batch = torch.cat(batch.reward).unsqueeze(1) # (bs,1)
         done_batch = torch.cat(batch.done).unsqueeze(1) #(bs,1)
 
@@ -227,7 +252,7 @@ for epoch in range(args.epoch):
                         evalenv = gym.make("BoxingNoFrameskip-v4")
                     evalenv = AtariWrapper(evalenv,video=video)
                     obs, info = evalenv.reset()
-                    obs = torch.from_numpy(obs).to(args.gpu)
+                    obs = torch.from_numpy(obs).to(device)
                     obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
                     evalreward = 0
                     policy_net.eval()
@@ -235,7 +260,7 @@ for epoch in range(args.epoch):
                         action = policy_net(obs).max(1)[1]
                         next_obs, reward, terminated, truncated, info = evalenv.step(action.item())
                         evalreward += reward
-                        next_obs = torch.from_numpy(next_obs).to(args.gpu) # (84,84)
+                        next_obs = torch.from_numpy(next_obs).to(device) # (84,84)
                         next_obs = torch.stack((next_obs,obs[0][0],obs[0][1],obs[0][2])).unsqueeze(0) # (1,4,84,84)
                         obs = next_obs
                         if terminated or truncated:
@@ -243,7 +268,7 @@ for epoch in range(args.epoch):
                                 break
                             else:
                                 obs, info = evalenv.reset()
-                                obs = torch.from_numpy(obs).to(args.gpu)
+                                obs = torch.from_numpy(obs).to(device)
                                 obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
                     evalenv.close()
                     video.save(f"{epoch}.mp4")
