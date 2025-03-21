@@ -290,7 +290,7 @@ for epoch in range(start_epoch, args.epoch):
                                 obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
                     evalenv.close()
                     video.save(f"{epoch}.mp4")
-                    torch.save(policy_net, os.path.join(log_dir,f'model{epoch}.pth')) 
+                    torch.save(policy_net, os.path.join(log_dir,f'model{epoch}_{steps_done}.pth'))
                     print(f"Eval epoch {epoch}: Reward {evalreward}")
             break
     
