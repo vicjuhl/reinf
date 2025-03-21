@@ -65,7 +65,6 @@ def select_action(state:torch.Tensor)->torch.Tensor:
     else:
         a = torch.tensor([[env.action_space.sample()]]).to(device)
         p_a = eps_threshold / n_action
-    print(a, torch.tensor(p_a, device=device))
     return a, torch.tensor([p_a], device=device)
 
 
@@ -201,8 +200,6 @@ for epoch in range(start_epoch, args.epoch):
         next_state_batch = torch.cat(batch.next_state) # (bs,4,84,84)
         action_batch = torch.cat(batch.action) # (bs,1)
         p_action_batch = torch.cat(batch.p_action) # (bs,1)
-        print(action_batch)
-        print(p_action_batch)
         reward_batch = torch.cat(batch.reward).unsqueeze(1) # (bs,1)
         done_batch = torch.cat(batch.done).unsqueeze(1) #(bs,1)
 
