@@ -241,6 +241,7 @@ for epoch in range(start_epoch, args.epoch):
         # optimize
         criterion = nn.SmoothL1Loss()
         loss = criterion(selected_state_qvalue, tdtarget)
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
