@@ -27,6 +27,7 @@ parser.add_argument('--ddqn',action='store_true', help="double dqn/dueldqn")
 parser.add_argument('--eval-cycle', default=500, type=int, help="evaluation cycle")
 parser.add_argument('--continue-from', type=int, help="epoch number to continue from")
 parser.add_argument('--model-path', type=str, help="path to saved model")
+parser.add_argument('--steps-done', type=int, help="number of steps done (from model filename)")
 args = parser.parse_args()
 
 # Device configuration
@@ -47,7 +48,8 @@ EPS_END = 0.05
 EPS_DECAY = 50000
 WARMUP = 1000 # don't update net until WARMUP steps
 
-steps_done = 0
+# Initialize steps_done
+steps_done = args.steps_done if args.steps_done is not None else 0
 eps_threshold = EPS_START
 def select_action(state:torch.Tensor)->torch.Tensor:
     '''
