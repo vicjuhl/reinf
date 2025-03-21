@@ -13,6 +13,7 @@ import os
 import matplotlib.pyplot as plt
 import math
 from collections import deque
+import time
 
 # parser
 parser = argparse.ArgumentParser()
@@ -28,7 +29,16 @@ parser.add_argument('--continue-from', type=int, help="epoch number to continue 
 parser.add_argument('--model-path', type=str, help="path to saved model")
 args = parser.parse_args()
 
-device = "cpu"
+# Device configuration
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+elif torch.cuda.is_available():
+    device = torch.device("cuda")
+else:
+    device = torch.device("cpu")
+print(f"Using device: {device}")
+
+torch.set_default_dtype(torch.float32)
 
 # some hyperparameters
 GAMMA = 0.99 # bellman function
@@ -57,15 +67,15 @@ def select_action(state:torch.Tensor)->torch.Tensor:
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
         math.exp(-1. * steps_done / EPS_DECAY)
     steps_done += 1
-    a_determ = policy_net(state).max(1)[1].view(1, 1)
-    if sample > eps_threshold:
-        with torch.no_grad():
+    with torch.no_grad():
+        a_determ = policy_net(state).max(1)[1].view(1, 1)
+        if sample > eps_threshold:
             p_a = (1 - eps_threshold) + eps_threshold / n_action
             a = a_determ
-    else:
-        a = torch.tensor([[env.action_space.sample()]]).to(device)
-        p_a = eps_threshold / n_action
-    return a, torch.tensor([p_a], device=device)
+        else:
+            a = torch.tensor([[env.action_space.sample()]]).to(device)
+            p_a = eps_threshold / n_action
+    return a, torch.tensor([p_a], dtype=torch.float32, device=device)
 
 
 # environment
@@ -99,9 +109,8 @@ if args.continue_from is not None and args.model_path is not None:
         raise FileNotFoundError(f"Model file not found: {args.model_path}")
     print(f"Loading model from {args.model_path}")
     try:
-        policy_net = torch.load(args.model_path, weights_only=False, map_location=torch.device('cpu')).to(device)
-        target_net = torch.load(args.model_path, weights_only=False, map_location=torch.device('cpu')).to(device)
-        steps_done = args.continue_from * 1000  # Approximate steps based on epochs
+        policy_net = torch.load(args.model_path, weights_only=False, map_location=torch.device(device))
+        target_net = torch.load(args.model_path, weights_only=False, map_location=torch.device(device))
     except Exception as e:
         raise Exception(f"Error loading model from {args.model_path}: {str(e)}")
 else:
@@ -124,11 +133,11 @@ print("Warming up...")
 warmupstep = 0
 for epoch in count():
     obs, info = env.reset() # (84,84)
-    obs = torch.from_numpy(obs).to(device) #(84,84)
+    obs = torch.from_numpy(obs).to(device).float() #(84,84)
     # stack four frames together, hoping to learn temporal info
     obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0) #(1,4,84,84)
 
-    p_action = torch.tensor([1 / n_action], device=device) # No ε yet, so always p(a|s) = 1 / |A|.
+    p_action = torch.tensor([1 / n_action], dtype=torch.float32, device=device) # No ε yet, so always p(a|s) = 1 / |A|.
     # step loop
     for step in count():
         warmupstep += 1
@@ -138,9 +147,9 @@ for epoch in count():
         done = terminated or truncated
         
         # convert to tensor
-        reward = torch.tensor([reward],device=device) # (1)
-        done = torch.tensor([done],device=device) # (1)
-        next_obs = torch.from_numpy(next_obs).to(device) # (84,84)
+        reward = torch.tensor([reward], device=device, dtype=torch.float32) # (1)
+        done = torch.tensor([done], device=device) # (1)
+        next_obs = torch.from_numpy(next_obs).to(device).float() # (84,84)
         next_obs = torch.stack((next_obs,obs[0][0],obs[0][1],obs[0][2])).unsqueeze(0) # (1,4,84,84)
         
         # store the transition in memory
@@ -161,11 +170,14 @@ rewarddeq = deque([], maxlen=100)
 lossdeq = deque([],maxlen=100)
 avgrewardlist = []
 avglosslist = []
+
+t_0 = time.time()
+
 # epoch loop 
 start_epoch = args.continue_from if args.continue_from is not None else 0
 for epoch in range(start_epoch, args.epoch):
     obs, info = env.reset() # (84,84)
-    obs = torch.from_numpy(obs).to(device) #(84,84)
+    obs = torch.from_numpy(obs).to(device).float() #(84,84)
     # stack four frames together, hoping to learn temporal info
     obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0) #(1,4,84,84)
 
@@ -181,9 +193,9 @@ for epoch in range(start_epoch, args.epoch):
         done = terminated or truncated
         
         # convert to tensor
-        reward = torch.tensor([reward],device=device) # (1)
-        done = torch.tensor([done],device=device) # (1)
-        next_obs = torch.from_numpy(next_obs).to(device) # (84,84)
+        reward = torch.tensor([reward], device=device, dtype=torch.float32) # (1)
+        done = torch.tensor([done], device=device) # (1)
+        next_obs = torch.from_numpy(next_obs).to(device).float() # (84,84)
         next_obs = torch.stack((next_obs,obs[0][0],obs[0][1],obs[0][2])).unsqueeze(0) # (1,4,84,84)
         
         # store the transition in memory
@@ -227,10 +239,16 @@ for epoch in range(start_epoch, args.epoch):
         # optimize
         criterion = nn.SmoothL1Loss()
         loss = criterion(selected_state_qvalue, tdtarget)
-        total_loss += loss.item()
-        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        total_loss += loss.item()
+        
+        # Explicitly clear some tensors
+        del state_batch, next_state_batch, action_batch, p_action_batch
+        del reward_batch, done_batch, selected_state_qvalue, tdtarget
+        torch.cuda.empty_cache()  # For CUDA
+        if hasattr(torch.mps, 'empty_cache'):  # For MPS (if available in your PyTorch version)
+            torch.mps.empty_cache()
 
         # let target_net = policy_net every 1000 steps
         if steps_done % 1000 == 0:
@@ -249,7 +267,7 @@ for epoch in range(start_epoch, args.epoch):
                         evalenv = gym.make("BoxingNoFrameskip-v4")
                     evalenv = AtariWrapper(evalenv,video=video)
                     obs, info = evalenv.reset()
-                    obs = torch.from_numpy(obs).to(device)
+                    obs = torch.from_numpy(obs).to(device).float()
                     obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
                     evalreward = 0
                     policy_net.eval()
@@ -257,7 +275,7 @@ for epoch in range(start_epoch, args.epoch):
                         action = policy_net(obs).max(1)[1]
                         next_obs, reward, terminated, truncated, info = evalenv.step(action.item())
                         evalreward += reward
-                        next_obs = torch.from_numpy(next_obs).to(device) # (84,84)
+                        next_obs = torch.from_numpy(next_obs).to(device).float() # (84,84)
                         next_obs = torch.stack((next_obs,obs[0][0],obs[0][1],obs[0][2])).unsqueeze(0) # (1,4,84,84)
                         obs = next_obs
                         if terminated or truncated:
@@ -265,7 +283,7 @@ for epoch in range(start_epoch, args.epoch):
                                 break
                             else:
                                 obs, info = evalenv.reset()
-                                obs = torch.from_numpy(obs).to(device)
+                                obs = torch.from_numpy(obs).to(device).float()
                                 obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
                     evalenv.close()
                     video.save(f"{epoch}.mp4")
@@ -287,8 +305,13 @@ for epoch in range(start_epoch, args.epoch):
     with open(log_path,"a") as f:
         f.write(f"{output}\n")
 
-env.close()
+total_time = time.time() - t_0
+hours = int(total_time // 3600)
+minutes = int((total_time % 3600) // 60)
+seconds = int(total_time % 60)
+print(f"\nTotal training time: {hours}h {minutes}m {seconds}s")
 
+env.close()
 
 # plot loss-epoch and reward-epoch
 plt.figure(1)
