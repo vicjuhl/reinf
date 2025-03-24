@@ -14,6 +14,27 @@ import matplotlib.pyplot as plt
 import math
 from collections import deque
 import time
+import psutil
+import gc
+
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    process = psutil.Process()
+    mem = process.memory_info().rss / 1024 / 1024  # Convert to MB
+    return mem
+
+def print_tensor_sizes():
+    """Print sizes of all tensors in memory"""
+    total_size = 0
+    for obj in gc.get_objects():
+        try:
+            if torch.is_tensor(obj):
+                size = obj.element_size() * obj.nelement() / 1024 / 1024  # Size in MB
+                total_size += size
+                # print(f"Tensor of shape {obj.shape} and type {obj.dtype}: {size:.2f} MB")
+        except:
+            pass
+    print(f"Total tensor memory: {total_size:.2f} MB")
 
 # parser
 parser = argparse.ArgumentParser()
@@ -125,7 +146,7 @@ else:
     target_net.load_state_dict(policy_net.state_dict())
 
 # replay memory
-memory = ReplayMemory(50000)
+memory = ReplayMemory(10000)
 
 # optimizer
 optimizer = optim.AdamW(policy_net.parameters(), lr=args.lr, amsgrad=True)
@@ -245,13 +266,18 @@ for epoch in range(start_epoch, args.epoch):
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
+
+        # Safe to delete - only used for this batch:
+        del state_batch          # Input batch, already used
+        del next_state_batch     # Only used for computing tdtarget
+        del action_batch         # Only used for selecting Q-values
+        del p_action_batch       # Only used for this step
+        del reward_batch         # Only used for computing tdtarget
+        del done_batch          # Only used for computing tdtarget
         
-        # Explicitly clear some tensors
-        del state_batch, next_state_batch, action_batch, p_action_batch
-        del reward_batch, done_batch, selected_state_qvalue, tdtarget
-        torch.cuda.empty_cache()  # For CUDA
-        if hasattr(torch.mps, 'empty_cache'):  # For MPS (if available in your PyTorch version)
-            torch.mps.empty_cache()
+        # Need to be more careful with these:
+        del selected_state_qvalue  # Used in loss computation
+        del tdtarget              # Used in loss computation
 
         # let target_net = policy_net every 1000 steps
         if steps_done % 1000 == 0:
@@ -292,6 +318,10 @@ for epoch in range(start_epoch, args.epoch):
                     video.save(f"{epoch}.mp4")
                     torch.save(policy_net, os.path.join(log_dir,f'model{epoch}_{steps_done}.pth'))
                     print(f"Eval epoch {epoch}: Reward {evalreward}")
+                    
+                    # Clear cache after evaluation
+                    if device.type == "mps":
+                        torch.mps.empty_cache()
             break
     
     rewardList.append(total_reward)
@@ -307,6 +337,29 @@ for epoch in range(start_epoch, args.epoch):
     print(output)
     with open(log_path,"a") as f:
         f.write(f"{output}\n")
+
+    # Optionally, clear cache every N epochs
+    if epoch % 100 == 0 and device.type == "mps":
+        torch.mps.empty_cache()
+
+    # if epoch % 25 == 0:  # Print every 100 epochs
+    #     print(f"\nMemory diagnostics at epoch {epoch}:")
+    #     print(f"Current memory usage: {get_memory_usage():.2f} MB")
+    #     print("Tensor sizes in memory:")
+    #     print_tensor_sizes()
+    #     print(f"GPU memory allocated: {torch.cuda.memory_allocated(device)/1024/1024:.2f} MB") if device.type == "cuda" else None
+        
+    # After the evaluation step:
+    # if epoch % args.eval_cycle == 0:
+    #     print("\nMemory before garbage collection:")
+    #     print(f"Memory usage: {get_memory_usage():.2f} MB")
+    #     gc.collect()
+    #     if device.type == "cuda":
+    #         torch.cuda.empty_cache()
+    #     elif device.type == "mps":
+    #         torch.mps.empty_cache()
+    #     print("Memory after garbage collection:")
+    #     print(f"Memory usage: {get_memory_usage():.2f} MB")
 
 total_time = time.time() - t_0
 hours = int(total_time // 3600)
