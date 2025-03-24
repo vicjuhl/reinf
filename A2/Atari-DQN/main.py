@@ -101,17 +101,6 @@ def select_action(state:torch.Tensor)->torch.Tensor:
     return a, torch.tensor([p_a], dtype=torch.float32, device=device)
 
 
-# environment
-if args.env_name == "pong":
-    env = gym.make("PongNoFrameskip-v4")
-elif args.env_name == "breakout":
-    env = gym.make("BreakoutNoFrameskip-v4")
-else:
-    env = gym.make("BoxingNoFrameskip-v4")
-env = AtariWrapper(env)
-
-n_action = env.action_space.n # pong:6; breakout:4; boxing:18
-
 # make dir to store result
 if args.ddqn:
     methodname = f"double_{args.model}"
@@ -121,10 +110,41 @@ log_dir = os.path.join(f"log_{args.env_name}",methodname)
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 log_path = os.path.join(log_dir,"log.txt")
-
-
 # video
 video = VideoRecorder(log_dir)
+
+# environment
+if args.env_name == "pong":
+    env = gym.make("PongNoFrameskip-v4")
+    evalenv = gym.make("PongNoFrameskip-v4")
+elif args.env_name == "breakout":
+    env = gym.make("BreakoutNoFrameskip-v4")
+    evalenv = gym.make("BreakoutNoFrameskip-v4")
+else:
+    env = gym.make("BoxingNoFrameskip-v4")
+    evalenv = gym.make("BoxingNoFrameskip-v4")
+env = AtariWrapper(env)
+evalenv = AtariWrapper(evalenv, video=video)
+
+def set_seeds(seed):
+    """Set all random seeds for reproducibility"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    if torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed)
+
+# Set all random seeds
+set_seeds(456456456)
+env.unwrapped.seed(456456456)  # If you want to seed the base environment
+env.action_space.seed(456456456)  # Set action space seed
+evalenv.unwrapped.seed(456456456)
+evalenv.action_space.seed(456456456)
+
+n_action = env.action_space.n # pong:6; breakout:4; boxing:18
 
 # create network and target network
 if args.continue_from is not None and args.model_path is not None:
@@ -267,7 +287,6 @@ for epoch in range(start_epoch, args.epoch):
         optimizer.step()
         total_loss += loss.item()
 
-        # Safe to delete - only used for this batch:
         del state_batch          # Input batch, already used
         del next_state_batch     # Only used for computing tdtarget
         del action_batch         # Only used for selecting Q-values
@@ -275,7 +294,7 @@ for epoch in range(start_epoch, args.epoch):
         del reward_batch         # Only used for computing tdtarget
         del done_batch          # Only used for computing tdtarget
         
-        # Need to be more careful with these:
+        # Need to be more careful with these: TODO
         del selected_state_qvalue  # Used in loss computation
         del tdtarget              # Used in loss computation
 
@@ -288,13 +307,8 @@ for epoch in range(start_epoch, args.epoch):
             if epoch % args.eval_cycle == 0:
                 with torch.no_grad():
                     video.reset()
-                    if args.env_name == "pong":
-                        evalenv = gym.make("PongNoFrameskip-v4")
-                    elif args.env_name == "breakout":
-                        evalenv = gym.make("BreakoutNoFrameskip-v4")
-                    else:
-                        evalenv = gym.make("BoxingNoFrameskip-v4")
-                    evalenv = AtariWrapper(evalenv,video=video)
+                    evalenv.unwrapped.seed(456456456)
+                    evalenv.action_space.seed(456456456)
                     obs, info = evalenv.reset()
                     obs = torch.from_numpy(obs).to(device).float()
                     obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
@@ -368,6 +382,7 @@ seconds = int(total_time % 60)
 print(f"\nTotal training time: {hours}h {minutes}m {seconds}s")
 
 env.close()
+evalenv.close()
 
 # plot loss-epoch and reward-epoch
 plt.figure(1)
