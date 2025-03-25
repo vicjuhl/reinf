@@ -190,11 +190,7 @@ eps_threshold = EPS_START
 def p_of_a_given_s(is_on_policy):
     global eps_threshold
     global n_action
-    return torch.tensor(
-        [is_on_policy * (1 - eps_threshold) + eps_threshold / n_action],
-        dtype=torch.float32,
-        device=device
-    )
+    return is_on_policy * (1 - eps_threshold) + eps_threshold / n_action
 
 def select_action(state:torch.Tensor)->torch.Tensor:
     '''
@@ -222,7 +218,7 @@ def select_action(state:torch.Tensor)->torch.Tensor:
         # Explore
         else: # a sampled uniformly
             a = torch.tensor([[env.action_space.sample()]]).to(device)
-        p_a = p_of_a_given_s(a_determ == a)
+        p_a = p_of_a_given_s(torch.tensor([a_determ == a], dtype=torch.float32, device=device))
     return a, p_a
 
 t_0 = time.time()
@@ -291,6 +287,9 @@ for epoch in range(start_epoch, args.epoch):
             if args.alg == "q": # DQN
                 tdtarget = next_state_selected_qvalue * GAMMA * ~done_batch + reward_batch
             elif args.alg == "sis": # Expected SARSA with importance sampling
+                actions_on_policy_batch = state_qvalues.max(1)[1].view(1, 1) # Actions as chosen by current policy (bs,1)
+                is_on_policy = actions_on_policy_batch == action_batch
+                p_new_action_batch = ...
                 w = ...
                 tdtarget = ...
             elif args.alg == "snis": # Expected SARSA without importance sampling
