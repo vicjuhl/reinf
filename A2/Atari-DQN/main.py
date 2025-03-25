@@ -186,6 +186,16 @@ avglosslist = []
 # Initialize steps_done
 steps_done = args.steps_done if args.steps_done is not None else 0
 eps_threshold = EPS_START
+
+def p_of_a_given_s(is_on_policy):
+    global eps_threshold
+    global n_action
+    return torch.tensor(
+        [is_on_policy * (1 - eps_threshold) + eps_threshold / n_action],
+        dtype=torch.float32,
+        device=device
+    )
+
 def select_action(state:torch.Tensor)->torch.Tensor:
     '''
     epsilon greedy
@@ -212,8 +222,8 @@ def select_action(state:torch.Tensor)->torch.Tensor:
         # Explore
         else: # a sampled uniformly
             a = torch.tensor([[env.action_space.sample()]]).to(device)
-        p_a = (a_determ == a) * (1 - eps_threshold) + eps_threshold / n_action
-    return a, torch.tensor([p_a], dtype=torch.float32, device=device)
+        p_a = p_of_a_given_s(a_determ == a)
+    return a, p_a
 
 t_0 = time.time()
 
