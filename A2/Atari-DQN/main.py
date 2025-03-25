@@ -187,10 +187,23 @@ avglosslist = []
 steps_done = args.steps_done if args.steps_done is not None else 0
 eps_threshold = EPS_START
 
-def p_of_a_given_s(is_on_policy):
+def p_of_a_given_s(is_greedy):
+    '''
+    Calculate p(a|s) where s is implicit (according to call scope) and
+    a is either implicit by call scope (when is_greedy.shape is (bs,1))
+    or all a options are evaluated (when is_greedy.shape is (bs,n_actions)).
+
+    Input:
+        is_greedy torch.Tensor(torch.float32) with values in {0., 1.}, shape (bs,n_actions)
+        describes whether a is the current greedy choice given s.
+        When dim1 == 1, is_greedy is a regulare bool tensor (formated as float32).
+        When dim1 == n_actions, is_greedy is a one-hot encoding where 1 means the greedy choice.
+
+    Output: torch.Tensor(torch.float32) array of cond. probs., shape (bs,1)
+    '''
     global eps_threshold
     global n_action
-    return is_on_policy * (1 - eps_threshold) + eps_threshold / n_action
+    return is_greedy * (1 - eps_threshold) + eps_threshold / n_action
 
 def select_action(state:torch.Tensor)->torch.Tensor:
     '''
@@ -211,14 +224,14 @@ def select_action(state:torch.Tensor)->torch.Tensor:
         math.exp(-1. * steps_done / EPS_DECAY)
     steps_done += 1
     with torch.no_grad():
-        a_determ = policy_net(state).max(1)[1].view(1, 1)
+        a_greedy = policy_net(state).max(1)[1].view(1, 1)
         # Exploit
         if sample > eps_threshold: # a == π(s)
-            a = a_determ
+            a = a_greedy
         # Explore
         else: # a sampled uniformly
             a = torch.tensor([[env.action_space.sample()]]).to(device)
-        p_a = p_of_a_given_s(torch.tensor([a_determ == a], dtype=torch.float32, device=device))
+        p_a = p_of_a_given_s(torch.tensor([a_greedy == a], dtype=torch.float32, device=device))
     return a, p_a
 
 t_0 = time.time()
@@ -267,39 +280,58 @@ for epoch in range(start_epoch, args.epoch):
 
         # Q(st,a)
         state_qvalues = policy_net(state_batch) # (bs,n_actions)
-        selected_state_qvalue = state_qvalues.gather(1,action_batch) # (bs,1)
+        selected_state_qvalue = state_qvalues.gather(1,action_batch) # (bs,1) # Q(s,a) straight from the buffer
         
-        with torch.no_grad():
-            # Q'(st+1,a)
-            next_state_target_qvalues = target_net(next_state_batch) # (bs,n_actions)
-            if args.ddqn:
-                # Q(st+1,a)
-                next_state_qvalues = policy_net(next_state_batch) # (bs,n_actions)
-                # argmax Q(st+1,a)
-                next_state_selected_action = next_state_qvalues.max(1,keepdim=True)[1] # (bs,1)
-                # Q'(st+1,argmax_a Q(st+1,a))
-                next_state_selected_qvalue = next_state_target_qvalues.gather(1,next_state_selected_action) # (bs,1)
-            else:
-                # max_a Q'(st+1,a)
-                next_state_selected_qvalue = next_state_target_qvalues.max(1,keepdim=True)[0] # (bs,1)
+        # td target
+        if args.alg == "q": # DQN
+            with torch.no_grad():
+                criterion = nn.SmoothL1Loss()
+                # Q'(st+1,a)
+                next_state_target_qvalues = target_net(next_state_batch) # (bs,n_actions)
+                if args.ddqn:
+                    # Q(st+1,a)
+                    next_state_qvalues = policy_net(next_state_batch) # (bs,n_actions)
+                    # argmax Q(st+1,a)
+                    next_state_selected_action = next_state_qvalues.max(1,keepdim=True)[1] # (bs,1)
+                    # Q'(st+1,argmax_a Q(st+1,a))
+                    next_state_selected_qvalue = next_state_target_qvalues.gather(1,next_state_selected_action) # (bs,1)
+                else:
+                    # max_a Q'(st+1,a)
+                    next_state_selected_qvalue = next_state_target_qvalues.max(1,keepdim=True)[0] # (bs,1)
 
-            # td target
-            if args.alg == "q": # DQN
-                tdtarget = next_state_selected_qvalue * GAMMA * ~done_batch + reward_batch
-            elif args.alg == "sis": # Expected SARSA with importance sampling
-                actions_on_policy_batch = state_qvalues.max(1)[1].view(1, 1) # Actions as chosen by current policy (bs,1)
-                is_on_policy = actions_on_policy_batch == action_batch
-                p_new_action_batch = ...
-                w = ...
-                tdtarget = ...
-            elif args.alg == "snis": # Expected SARSA without importance sampling
-                tdtarget = ...
-            else:
-                raise ValueError(f"Unknown algorithm: {args.alg}")
+            tdtarget = reward_batch + next_state_selected_qvalue * GAMMA * ~done_batch
+            loss = criterion(selected_state_qvalue, tdtarget)
+
+        elif args.alg == "sis": # Expected SARSA with importance sampling
+            criterion = nn.MSELoss(reduction='none')
+
+            with torch.no_grad():
+                # Create weights w
+                greedy_actions = state_qvalues.max(1)[1].view(-1, 1) # Actions as chosen by current policy (bs,1)
+                is_greedy = action_batch == greedy_actions # Whether a is the greedy choice (bs,1)
+                p_new_a_given_s = p_of_a_given_s(is_greedy) # p_new(a|s) according to current policy for all a, (bs,1)
+                w = p_new_a_given_s / p_action_batch # weights = p_new(a|s) / p_old(a|s), (bs,1)
+
+                # Create target
+                next_state_qvalues = target_net(next_state_batch) # Q(s',a'), (bs,n_actions)
+                next_greedy_actions = next_state_qvalues.max(1)[1].view(-1, 1) # (bs,1)
+                next_is_greedy_one_hot = torch.zeros_like(next_state_qvalues, device=device) # (bs,n_actions)
+                next_is_greedy_one_hot.scatter_(1, next_greedy_actions, 1) # (bs,n_actions)
+                next_p_new_all_a = p_of_a_given_s(next_is_greedy_one_hot) # (bs,n_actions)
+                expected_q = (next_p_new_all_a * next_state_qvalues).sum(dim=1, keepdim=True) # (bs,1)
+                tdtarget = reward_batch + GAMMA * expected_q * ~done_batch # (bs,1)
+
+            # Compute loss with importance sampling
+            loss_elements = criterion(selected_state_qvalue, tdtarget) # (bs,1)
+            loss = (w * loss_elements).mean()
+
+        elif args.alg == "snis": # Expected SARSA without importance sampling
+            tdtarget = ...
+
+        else:
+            raise ValueError(f"Unknown algorithm: {args.alg}")
 
         # optimize
-        criterion = nn.SmoothL1Loss()
-        loss = criterion(selected_state_qvalue, tdtarget)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
