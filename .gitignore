@@ -21,3 +21,5 @@ __pycache__
 *.pyc
 *.svg
 *.pth
+*.mp4
+*.txt
