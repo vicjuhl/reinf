@@ -10,12 +10,14 @@ import torch
 import torch.nn as nn
 from itertools import count
 import os
-import matplotlib.pyplot as plt
 import math
 from collections import deque
 import time
 import psutil
 import gc
+import json
+import sys
+from plots import create_plots
 
 def get_memory_usage():
     """Get current memory usage in MB"""
@@ -51,6 +53,7 @@ parser.add_argument('--continue-from', type=int, help="epoch number to continue 
 parser.add_argument('--model-path', type=str, help="path to saved model")
 parser.add_argument('--steps-done', type=int, help="number of steps done (from model filename)")
 parser.add_argument('--exp_id', type=int, help="experiement identifier")
+parser.add_argument('--sim', action='store_true', help="whether to simulate (not set goes straight to plotting)")
 args = parser.parse_args()
 
 # Device configuration
@@ -79,8 +82,13 @@ log_dir = os.path.join(f"log_{args.env_name}",alg_name,f"exp_{str(args.exp_id)}"
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 log_path = os.path.join(log_dir,"log.txt")
+json_path = os.path.join(log_dir,"results.json")
 # video
 video = VideoRecorder(log_dir)
+
+if not args.sim:
+    create_plots(log_dir)
+    sys.exit(0)
 
 def set_seeds(seed):
     """Set all random seeds for reproducibility"""
@@ -433,19 +441,14 @@ print(f"\nTotal training time: {hours}h {minutes}m {seconds}s")
 
 env.close()
 
-# plot loss-epoch and reward-epoch
-plt.figure(1)
-plt.xlabel("Epoch")
-plt.ylabel("Loss")
-plt.plot(range(len(lossList)),lossList,label="loss")
-plt.plot(range(len(lossList)),avglosslist,label="avg")
-plt.legend()
-plt.savefig(os.path.join(log_dir,"loss.png"))
+# Save results to JSON
+results = {
+    'rewards': rewardList,
+    'losses': lossList,
+    'avg_rewards': avgrewardlist,
+    'avg_losses': avglosslist
+}
+with open(json_path, 'w') as f:
+    json.dump(results, f)
 
-plt.figure(2)
-plt.xlabel("Epoch")
-plt.ylabel("Reward")
-plt.plot(range(len(rewardList)),rewardList,label="reward")
-plt.plot(range(len(rewardList)),avgrewardlist, label="avg")
-plt.legend()
-plt.savefig(os.path.join(log_dir,"reward.png"))
+create_plots(log_dir)
