@@ -40,6 +40,7 @@ def print_tensor_sizes():
 parser = argparse.ArgumentParser()
 parser.add_argument('--env-name',default="breakout",type=str,choices=["pong","breakout","boxing"], help="env name")
 parser.add_argument('--model', default="dqn", type=str, choices=["dqn","dueldqn"], help="dqn model")
+parser.add_argument('--alg', default="q", type=str, choices=["q","sis","snis"], help="algorithm (q-learning, expected sarsa w. importance sampling, expected sarsa with no importance sampling)")
 parser.add_argument('--gpu',default=0,type=int,help="which gpu to use")
 parser.add_argument('--lr', default=2.5e-4, type=float, help="learning rate")
 parser.add_argument('--epoch', default=10001, type=int, help="training epoch")
@@ -67,39 +68,7 @@ GAMMA = 0.99 # bellman function
 EPS_START = 1
 EPS_END = 0.05
 EPS_DECAY = 50000
-WARMUP = 1000 # don't update net until WARMUP steps
-
-# Initialize steps_done
-steps_done = args.steps_done if args.steps_done is not None else 0
-eps_threshold = EPS_START
-def select_action(state:torch.Tensor)->torch.Tensor:
-    '''
-    epsilon greedy
-    - epsilon: choose random action
-    - 1-epsilon: argmax Q(a,s)
-
-    Input: state shape (1,4,84,84)
-
-    Output: action shape (1,1)
-    '''
-    global eps_threshold
-    global steps_done
-    global n_action
-    global device
-    sample = random.random()
-    eps_threshold = EPS_END + (EPS_START - EPS_END) * \
-        math.exp(-1. * steps_done / EPS_DECAY)
-    steps_done += 1
-    with torch.no_grad():
-        a_determ = policy_net(state).max(1)[1].view(1, 1)
-        if sample > eps_threshold:
-            p_a = (1 - eps_threshold) + eps_threshold / n_action
-            a = a_determ
-        else:
-            a = torch.tensor([[env.action_space.sample()]]).to(device)
-            p_a = eps_threshold / n_action
-    return a, torch.tensor([p_a], dtype=torch.float32, device=device)
-
+WARMUP = 100 # don't update net until WARMUP steps TODO was 1000
 
 # make dir to store result
 if args.ddqn:
@@ -214,6 +183,38 @@ lossdeq = deque([],maxlen=100)
 avgrewardlist = []
 avglosslist = []
 
+# Initialize steps_done
+steps_done = args.steps_done if args.steps_done is not None else 0
+eps_threshold = EPS_START
+def select_action(state:torch.Tensor)->torch.Tensor:
+    '''
+    epsilon greedy
+    - epsilon: choose random action
+    - 1-epsilon: argmax Q(a,s)
+
+    Input: state shape (1,4,84,84)
+
+    Output: action shape (1,1)
+    '''
+    global eps_threshold
+    global steps_done
+    global n_action
+    global device
+    sample = random.random()
+    eps_threshold = EPS_END + (EPS_START - EPS_END) * \
+        math.exp(-1. * steps_done / EPS_DECAY)
+    steps_done += 1
+    with torch.no_grad():
+        a_determ = policy_net(state).max(1)[1].view(1, 1)
+        # Exploit
+        if sample > eps_threshold: # a == π(s)
+            a = a_determ
+        # Explore
+        else: # a sampled uniformly
+            a = torch.tensor([[env.action_space.sample()]]).to(device)
+        p_a = (a_determ == a) * (1 - eps_threshold) + eps_threshold / n_action
+    return a, torch.tensor([p_a], dtype=torch.float32, device=device)
+
 t_0 = time.time()
 
 # epoch loop 
@@ -276,8 +277,16 @@ for epoch in range(start_epoch, args.epoch):
                 # max_a Q'(st+1,a)
                 next_state_selected_qvalue = next_state_target_qvalues.max(1,keepdim=True)[0] # (bs,1)
 
-        # td target
-        tdtarget = next_state_selected_qvalue * GAMMA * ~done_batch + reward_batch # (bs,1)
+            # td target
+            if args.alg == "q": # DQN
+                tdtarget = next_state_selected_qvalue * GAMMA * ~done_batch + reward_batch
+            elif args.alg == "sis": # Expected SARSA with importance sampling
+                w = ...
+                tdtarget = ...
+            elif args.alg == "snis": # Expected SARSA without importance sampling
+                tdtarget = ...
+            else:
+                raise ValueError(f"Unknown algorithm: {args.alg}")
 
         # optimize
         criterion = nn.SmoothL1Loss()
