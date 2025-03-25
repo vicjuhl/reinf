@@ -50,6 +50,7 @@ parser.add_argument('--eval-cycle', default=500, type=int, help="evaluation cycl
 parser.add_argument('--continue-from', type=int, help="epoch number to continue from")
 parser.add_argument('--model-path', type=str, help="path to saved model")
 parser.add_argument('--steps-done', type=int, help="number of steps done (from model filename)")
+parser.add_argument('--exp_id', type=int, help="experiement identifier")
 args = parser.parse_args()
 
 # Device configuration
@@ -71,18 +72,31 @@ EPS_DECAY = 50000
 WARMUP = 100 # don't update net until WARMUP steps TODO was 1000
 
 # make dir to store result
-if args.ddqn:
-    methodname = f"double_{args.model}"
-else:
-    methodname = args.model
-log_dir = os.path.join(f"log_{args.env_name}",methodname)
+alg_name = args.alg
+if alg_name == "q" and args.ddqn:
+    alg_name = f"double_{alg_name}"
+log_dir = os.path.join(f"log_{args.env_name}",alg_name,f"exp_{str(args.exp_id)}")
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 log_path = os.path.join(log_dir,"log.txt")
 # video
 video = VideoRecorder(log_dir)
 
-# environment
+def set_seeds(seed):
+    """Set all random seeds for reproducibility"""
+    random.seed(seed * 1)
+    np.random.seed(seed * 2)
+    torch.manual_seed(seed * 3)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed * 4)
+        torch.cuda.manual_seed_all(seed * 5)
+    if torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed * 6)
+
+# Set all random seeds
+set_seeds(345 * args.exp_id)
+
+# Environment
 if args.env_name == "pong":
     env = gym.make("PongNoFrameskip-v4")
     evalenv = gym.make("PongNoFrameskip-v4")
@@ -92,26 +106,14 @@ elif args.env_name == "breakout":
 else:
     env = gym.make("BoxingNoFrameskip-v4")
     evalenv = gym.make("BoxingNoFrameskip-v4")
+
 env = AtariWrapper(env)
+env.unwrapped.seed(456 * args.exp_id)  # If you want to seed the base environment
+env.action_space.seed(567 * args.exp_id)  # Set action space seed
+
 evalenv = AtariWrapper(evalenv, video=video)
-
-def set_seeds(seed):
-    """Set all random seeds for reproducibility"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-    if torch.backends.mps.is_available():
-        torch.mps.manual_seed(seed)
-
-# Set all random seeds
-set_seeds(456456456)
-env.unwrapped.seed(456456456)  # If you want to seed the base environment
-env.action_space.seed(456456456)  # Set action space seed
-evalenv.unwrapped.seed(456456456)
-evalenv.action_space.seed(456456456)
+evalenv.unwrapped.seed(123 * args.exp_id)
+evalenv.action_space.seed(234 * args.exp_id)
 
 n_action = env.action_space.n # pong:6; breakout:4; boxing:18
 
@@ -357,8 +359,6 @@ for epoch in range(start_epoch, args.epoch):
             if epoch % args.eval_cycle == 0:
                 with torch.no_grad():
                     video.reset()
-                    evalenv.unwrapped.seed(456456456)
-                    evalenv.action_space.seed(456456456)
                     obs, info = evalenv.reset()
                     obs = torch.from_numpy(obs).to(device).float()
                     obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
@@ -432,7 +432,6 @@ seconds = int(total_time % 60)
 print(f"\nTotal training time: {hours}h {minutes}m {seconds}s")
 
 env.close()
-evalenv.close()
 
 # plot loss-epoch and reward-epoch
 plt.figure(1)
