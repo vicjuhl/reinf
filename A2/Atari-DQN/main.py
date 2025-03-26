@@ -44,7 +44,7 @@ def print_tensor_sizes():
 # parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--env-name',default="breakout",type=str,choices=["pong","breakout","boxing"], help="env name")
-parser.add_argument('--model', default="dqn", type=str, choices=["dqn","e-sarsa"], help="dqn model (q-learning, expected SARSA)")
+parser.add_argument('--model', default="q", type=str, choices=["q","e-sarsa"], help="dqn model (q-learning, expected SARSA)")
 parser.add_argument('--double',action='store_true', help="double dqn")
 parser.add_argument('--duel',action='store_true', help="dueling dqn")
 parser.add_argument('--ims',action='store_true', help="importance sampling for e-SARSA")
@@ -57,6 +57,7 @@ parser.add_argument('--model-path', type=str, help="path to saved model")
 parser.add_argument('--steps-done', type=int, help="number of steps done (from model filename)")
 parser.add_argument('--exp_id', type=int, help="experiement identifier")
 parser.add_argument('--sim', action='store_true', help="whether to simulate (not set goes straight to plotting)")
+parser.add_argument('--smaller', action='store_true', help="make neural network smaller for computational efficiency")
 args = parser.parse_args()
 
 if args.exp_id is None or args.exp_id == 0:
@@ -79,22 +80,19 @@ GAMMA = 0.99 # bellman function
 EPS_START = 1
 EPS_END = 0.05
 EPS_DECAY = 50000
-WARMUP = 100 # don't update net until WARMUP steps TODO was 1000
+WARMUP = 1000 # don't update net until WARMUP steps
 N_EVALS = 5
 VIDEO_CYCLE = args.eval_cycle * 10
 
 # make model specific dir and configurations
 alg_name = args.model
-if alg_name == "dqn":
-    criterion = nn.SmoothL1Loss()
-    if args.double:
-        alg_name = f"double_{alg_name}"
-    if args.duel:
-        alg_name = f"duel_{alg_name}"
-elif alg_name == "e-sarsa":
-    criterion = nn.MSELoss()
-    if args.ims:
-        alg_name = f"{alg_name}_importance_sampling"
+if args.double:
+    alg_name = f"double_{alg_name}"
+if args.duel:
+    alg_name = f"duel_{alg_name}"
+if args.model == "e-sarsa" and args.ims:
+    alg_name = f"{alg_name}_importance_sampling"
+
 log_dir = os.path.join(f"log_{args.env_name}", alg_name, f"exp_{str(args.exp_id)}")
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
@@ -154,8 +152,8 @@ if args.continue_from is not None and args.model_path is not None:
         raise Exception(f"Error loading model from {args.model_path}: {str(e)}")
 else:
     if not args.duel:
-        policy_net = DQN(in_channels=4, n_actions=n_action).to(device)
-        target_net = DQN(in_channels=4, n_actions=n_action).to(device)
+        policy_net = DQN(in_channels=4, n_actions=n_action, smaller=args.smaller).to(device)
+        target_net = DQN(in_channels=4, n_actions=n_action, smaller=args.smaller).to(device)
     else:
         policy_net = DuelDQN(in_channels=4, n_actions=n_action).to(device)
         target_net = DuelDQN(in_channels=4, n_actions=n_action).to(device)
@@ -166,6 +164,7 @@ memory = ReplayMemory(10000)
 
 # optimizer
 optimizer = optim.AdamW(policy_net.parameters(), lr=args.lr, amsgrad=True)
+criterion = nn.MSELoss()
 
 # warming up
 print("Warming up...")
@@ -311,7 +310,7 @@ for epoch in range(start_epoch, args.epoch):
         selected_state_qvalue = state_qvalues.gather(1,action_batch) # (bs,1) # Q(s,a) straight from the buffer
         
         # td target
-        if args.model == "dqn": # DQN
+        if args.model == "q": # Q-learning
             with torch.no_grad():
                 # Q'(st+1,a)
                 next_state_target_qvalues = target_net(next_state_batch) # (bs,n_actions)
@@ -337,7 +336,7 @@ for epoch in range(start_epoch, args.epoch):
                     greedy_actions = state_qvalues.max(1)[1].view(-1, 1) # Actions as chosen by current policy (bs,1)
                     is_greedy = action_batch == greedy_actions # Whether a is the greedy choice (bs,1)
                     p_new_a_given_s = p_of_a_given_s(is_greedy) # p_new(a|s) according to current policy for all a, (bs,1)
-                    w = p_new_a_given_s / p_action_batch # weights = p_new(a|s) / p_old(a|s), (bs,1)
+                    w = p_new_a_given_s / (p_action_batch + 0.1) # weights = p_new(a|s) / (p_old(a|s) + δ), (bs,1)
                 else:
                     # Uniform importance sampling
                     w = torch.ones_like(p_action_batch, dtype=torch.float32, device=device)
