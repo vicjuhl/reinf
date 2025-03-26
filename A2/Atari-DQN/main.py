@@ -13,33 +13,11 @@ import os
 import math
 from collections import deque
 import time
-import psutil
-import gc
 import json
 import sys
 from plots import create_plots
 import pandas as pd
 from statistics import mean
-
-
-def get_memory_usage():
-    """Get current memory usage in MB"""
-    process = psutil.Process()
-    mem = process.memory_info().rss / 1024 / 1024  # Convert to MB
-    return mem
-
-def print_tensor_sizes():
-    """Print sizes of all tensors in memory"""
-    total_size = 0
-    for obj in gc.get_objects():
-        try:
-            if torch.is_tensor(obj):
-                size = obj.element_size() * obj.nelement() / 1024 / 1024  # Size in MB
-                total_size += size
-                # print(f"Tensor of shape {obj.shape} and type {obj.dtype}: {size:.2f} MB")
-        except:
-            pass
-    print(f"Total tensor memory: {total_size:.2f} MB")
 
 # parser
 parser = argparse.ArgumentParser()
@@ -424,25 +402,6 @@ for epoch in range(args.epoch):
     # Optionally, clear cache every N epochs
     if epoch % 100 == 0 and device.type == "mps":
         torch.mps.empty_cache()
-
-    # if epoch % 25 == 0:  # Print every 100 epochs
-    #     print(f"\nMemory diagnostics at epoch {epoch}:")
-    #     print(f"Current memory usage: {get_memory_usage():.2f} MB")
-    #     print("Tensor sizes in memory:")
-    #     print_tensor_sizes()
-    #     print(f"GPU memory allocated: {torch.cuda.memory_allocated(device)/1024/1024:.2f} MB") if device.type == "cuda" else None
-        
-    # After the evaluation step:
-    # if epoch % args.eval_cycle == 0:
-    #     print("\nMemory before garbage collection:")
-    #     print(f"Memory usage: {get_memory_usage():.2f} MB")
-    #     gc.collect()
-    #     if device.type == "cuda":
-    #         torch.cuda.empty_cache()
-    #     elif device.type == "mps":
-    #         torch.mps.empty_cache()
-    #     print("Memory after garbage collection:")
-    #     print(f"Memory usage: {get_memory_usage():.2f} MB")
 
 # Print time statistic
 total_time = time.time() - t_0
