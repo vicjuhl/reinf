@@ -41,9 +41,10 @@ def print_tensor_sizes():
 # parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--env-name',default="breakout",type=str,choices=["pong","breakout","boxing"], help="env name")
-parser.add_argument('--model', default="dqn", type=str, choices=["dqn","sis","snis"], help="dqn model (q-learning, expected sarsa w. importance sampling, expected sarsa with no importance sampling)")
+parser.add_argument('--model', default="dqn", type=str, choices=["dqn","e-sarsa"], help="dqn model (q-learning, expected SARSA)")
 parser.add_argument('--double',action='store_true', help="double dqn")
 parser.add_argument('--duel',action='store_true', help="dueling dqn")
+parser.add_argument('--ims',action='store_true', help="importance sampling for e-SARSA")
 parser.add_argument('--lr', default=2.5e-4, type=float, help="learning rate")
 parser.add_argument('--epoch', default=10001, type=int, help="training epoch")
 parser.add_argument('--batch-size', default=32, type=int, help="batch size")
@@ -85,8 +86,10 @@ if alg_name == "dqn":
         alg_name = f"double_{alg_name}"
     if args.duel:
         alg_name = f"duel_{alg_name}"
-elif alg_name in ["sis", "snis"]:
+elif alg_name == "e-sarsa":
     criterion = nn.MSELoss()
+    if args.ims:
+        alg_name = f"{alg_name}_importance_sampling"
 log_dir = os.path.join(f"log_{args.env_name}", alg_name, f"exp_{str(args.exp_id)}")
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
@@ -320,13 +323,18 @@ for epoch in range(start_epoch, args.epoch):
             tdtarget = reward_batch + next_state_selected_qvalue * GAMMA * ~done_batch
             loss = criterion(selected_state_qvalue, tdtarget)
 
-        elif args.model == "sis": # Expected SARSA with importance sampling
+        elif args.model == "e-sarsa": # Expected SARSA
             with torch.no_grad():
                 # Create weights w
-                greedy_actions = state_qvalues.max(1)[1].view(-1, 1) # Actions as chosen by current policy (bs,1)
-                is_greedy = action_batch == greedy_actions # Whether a is the greedy choice (bs,1)
-                p_new_a_given_s = p_of_a_given_s(is_greedy) # p_new(a|s) according to current policy for all a, (bs,1)
-                w = p_new_a_given_s / p_action_batch # weights = p_new(a|s) / p_old(a|s), (bs,1)
+                if args.ims:
+                    # Importance sampling
+                    greedy_actions = state_qvalues.max(1)[1].view(-1, 1) # Actions as chosen by current policy (bs,1)
+                    is_greedy = action_batch == greedy_actions # Whether a is the greedy choice (bs,1)
+                    p_new_a_given_s = p_of_a_given_s(is_greedy) # p_new(a|s) according to current policy for all a, (bs,1)
+                    w = p_new_a_given_s / p_action_batch # weights = p_new(a|s) / p_old(a|s), (bs,1)
+                else:
+                    # Uniform importance sampling
+                    w = torch.ones_like(p_action_batch, dtype=torch.float32, device=device)
 
                 # Create target
                 next_state_qvalues = target_net(next_state_batch) # Q(s',a'), (bs,n_actions)
