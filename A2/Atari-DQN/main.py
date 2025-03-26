@@ -41,13 +41,12 @@ def print_tensor_sizes():
 # parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--env-name',default="breakout",type=str,choices=["pong","breakout","boxing"], help="env name")
-parser.add_argument('--model', default="dqn", type=str, choices=["dqn","dueldqn"], help="dqn model")
-parser.add_argument('--alg', default="q", type=str, choices=["q","sis","snis"], help="algorithm (q-learning, expected sarsa w. importance sampling, expected sarsa with no importance sampling)")
-parser.add_argument('--gpu',default=0,type=int,help="which gpu to use")
+parser.add_argument('--model', default="dqn", type=str, choices=["dqn","sis","snis"], help="dqn model (q-learning, expected sarsa w. importance sampling, expected sarsa with no importance sampling)")
+parser.add_argument('--double',action='store_true', help="double dqn")
+parser.add_argument('--duel',action='store_true', help="dueling dqn")
 parser.add_argument('--lr', default=2.5e-4, type=float, help="learning rate")
 parser.add_argument('--epoch', default=10001, type=int, help="training epoch")
 parser.add_argument('--batch-size', default=32, type=int, help="batch size")
-parser.add_argument('--ddqn',action='store_true', help="double dqn/dueldqn")
 parser.add_argument('--eval-cycle', default=500, type=int, help="evaluation cycle")
 parser.add_argument('--continue-from', type=int, help="epoch number to continue from")
 parser.add_argument('--model-path', type=str, help="path to saved model")
@@ -55,6 +54,10 @@ parser.add_argument('--steps-done', type=int, help="number of steps done (from m
 parser.add_argument('--exp_id', type=int, help="experiement identifier")
 parser.add_argument('--sim', action='store_true', help="whether to simulate (not set goes straight to plotting)")
 args = parser.parse_args()
+
+if args.exp_id is None:
+    print("exp_id (integer) must be provided")
+    sys.exit(0)
 
 # Device configuration
 if torch.backends.mps.is_available():
@@ -74,11 +77,17 @@ EPS_END = 0.05
 EPS_DECAY = 50000
 WARMUP = 100 # don't update net until WARMUP steps TODO was 1000
 
-# make dir to store result
-alg_name = args.alg
-if alg_name == "q" and args.ddqn:
-    alg_name = f"double_{alg_name}"
-log_dir = os.path.join(f"log_{args.env_name}",alg_name,f"exp_{str(args.exp_id)}")
+# make model specific dir and configurations
+alg_name = args.model
+if alg_name == "dqn":
+    criterion = nn.SmoothL1Loss()
+    if args.double:
+        alg_name = f"double_{alg_name}"
+    if args.duel:
+        alg_name = f"duel_{alg_name}"
+elif alg_name in ["sis", "snis"]:
+    criterion = nn.MSELoss()
+log_dir = os.path.join(f"log_{args.env_name}", alg_name, f"exp_{str(args.exp_id)}")
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 log_path = os.path.join(log_dir,"log.txt")
@@ -136,7 +145,7 @@ if args.continue_from is not None and args.model_path is not None:
     except Exception as e:
         raise Exception(f"Error loading model from {args.model_path}: {str(e)}")
 else:
-    if args.model == "dqn":
+    if not args.duel:
         policy_net = DQN(in_channels=4, n_actions=n_action).to(device)
         target_net = DQN(in_channels=4, n_actions=n_action).to(device)
     else:
@@ -293,12 +302,11 @@ for epoch in range(start_epoch, args.epoch):
         selected_state_qvalue = state_qvalues.gather(1,action_batch) # (bs,1) # Q(s,a) straight from the buffer
         
         # td target
-        if args.alg == "q": # DQN
+        if args.model == "dqn": # DQN
             with torch.no_grad():
-                criterion = nn.SmoothL1Loss()
                 # Q'(st+1,a)
                 next_state_target_qvalues = target_net(next_state_batch) # (bs,n_actions)
-                if args.ddqn:
+                if args.double:
                     # Q(st+1,a)
                     next_state_qvalues = policy_net(next_state_batch) # (bs,n_actions)
                     # argmax Q(st+1,a)
@@ -312,9 +320,7 @@ for epoch in range(start_epoch, args.epoch):
             tdtarget = reward_batch + next_state_selected_qvalue * GAMMA * ~done_batch
             loss = criterion(selected_state_qvalue, tdtarget)
 
-        elif args.alg == "sis": # Expected SARSA with importance sampling
-            criterion = nn.MSELoss(reduction='none')
-
+        elif args.model == "sis": # Expected SARSA with importance sampling
             with torch.no_grad():
                 # Create weights w
                 greedy_actions = state_qvalues.max(1)[1].view(-1, 1) # Actions as chosen by current policy (bs,1)
