@@ -52,8 +52,6 @@ parser.add_argument('--lr', default=2.5e-4, type=float, help="learning rate")
 parser.add_argument('--epoch', default=10001, type=int, help="training epoch")
 parser.add_argument('--batch-size', default=32, type=int, help="batch size")
 parser.add_argument('--eval-cycle', default=500, type=int, help="evaluation cycle")
-parser.add_argument('--continue-from', type=int, help="epoch number to continue from")
-parser.add_argument('--model-path', type=str, help="path to saved model")
 parser.add_argument('--steps-done', type=int, help="number of steps done (from model filename)")
 parser.add_argument('--exp_id', type=int, help="experiement identifier")
 parser.add_argument('--sim', action='store_true', help="whether to simulate (not set goes straight to plotting)")
@@ -141,26 +139,16 @@ evalenv.action_space.seed(234 * args.exp_id)
 n_action = env.action_space.n # pong:6; breakout:4; boxing:18
 
 # create network and target network
-if args.continue_from is not None and args.model_path is not None:
-    if not os.path.exists(args.model_path):
-        raise FileNotFoundError(f"Model file not found: {args.model_path}")
-    print(f"Loading model from {args.model_path}")
-    try:
-        policy_net = torch.load(args.model_path, weights_only=False, map_location=torch.device(device))
-        target_net = torch.load(args.model_path, weights_only=False, map_location=torch.device(device))
-    except Exception as e:
-        raise Exception(f"Error loading model from {args.model_path}: {str(e)}")
+if not args.duel:
+    policy_net = DQN(in_channels=4, n_actions=n_action, smaller=args.smaller).to(device)
+    target_net = DQN(in_channels=4, n_actions=n_action, smaller=args.smaller).to(device)
 else:
-    if not args.duel:
-        policy_net = DQN(in_channels=4, n_actions=n_action, smaller=args.smaller).to(device)
-        target_net = DQN(in_channels=4, n_actions=n_action, smaller=args.smaller).to(device)
-    else:
-        policy_net = DuelDQN(in_channels=4, n_actions=n_action).to(device)
-        target_net = DuelDQN(in_channels=4, n_actions=n_action).to(device)
-    target_net.load_state_dict(policy_net.state_dict())
+    policy_net = DuelDQN(in_channels=4, n_actions=n_action).to(device)
+    target_net = DuelDQN(in_channels=4, n_actions=n_action).to(device)
+target_net.load_state_dict(policy_net.state_dict())
 
 # replay memory
-memory = ReplayMemory(10000)
+memory = ReplayMemory(25000)
 
 # optimizer
 optimizer = optim.AdamW(policy_net.parameters(), lr=args.lr, amsgrad=True)
@@ -263,9 +251,8 @@ def select_action(state:torch.Tensor)->torch.Tensor:
 
 t_0 = time.time()
 
-# epoch loop 
-start_epoch = args.continue_from if args.continue_from is not None else 0
-for epoch in range(start_epoch, args.epoch):
+# epoch loop
+for epoch in range(args.epoch):
     obs, info = env.reset() # (84,84)
     obs = torch.from_numpy(obs).to(device).float() #(84,84)
     # stack four frames together, hoping to learn temporal info
