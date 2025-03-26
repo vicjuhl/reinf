@@ -18,6 +18,9 @@ import gc
 import json
 import sys
 from plots import create_plots
+import pandas as pd
+from statistics import mean
+
 
 def get_memory_usage():
     """Get current memory usage in MB"""
@@ -56,8 +59,8 @@ parser.add_argument('--exp_id', type=int, help="experiement identifier")
 parser.add_argument('--sim', action='store_true', help="whether to simulate (not set goes straight to plotting)")
 args = parser.parse_args()
 
-if args.exp_id is None:
-    print("exp_id (integer) must be provided")
+if args.exp_id is None or args.exp_id == 0:
+    print("exp_id (non-zero positive integer) must be provided")
     sys.exit(0)
 
 # Device configuration
@@ -77,6 +80,8 @@ EPS_START = 1
 EPS_END = 0.05
 EPS_DECAY = 50000
 WARMUP = 100 # don't update net until WARMUP steps TODO was 1000
+N_EVALS = 5
+VIDEO_CYCLE = args.eval_cycle * 10
 
 # make model specific dir and configurations
 alg_name = args.model
@@ -204,6 +209,7 @@ rewarddeq = deque([], maxlen=100)
 lossdeq = deque([],maxlen=100)
 avgrewardlist = []
 avglosslist = []
+eval_results = []
 
 # Initialize steps_done
 steps_done = args.steps_done if args.steps_done is not None else 0
@@ -376,31 +382,39 @@ for epoch in range(start_epoch, args.epoch):
         if done:
             # eval
             if epoch % args.eval_cycle == 0:
+                t_eval_0 = time.time()
                 with torch.no_grad():
-                    video.reset()
-                    obs, info = evalenv.reset()
-                    obs = torch.from_numpy(obs).to(device).float()
-                    obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
-                    evalreward = 0
+                    save_video = (epoch % VIDEO_CYCLE == 0)
                     policy_net.eval()
-                    for _ in count():
-                        action = policy_net(obs).max(1)[1]
-                        next_obs, reward, terminated, truncated, info = evalenv.step(action.item())
-                        evalreward += reward
-                        next_obs = torch.from_numpy(next_obs).to(device).float() # (84,84)
-                        next_obs = torch.stack((next_obs,obs[0][0],obs[0][1],obs[0][2])).unsqueeze(0) # (1,4,84,84)
-                        obs = next_obs
-                        if terminated or truncated:
-                            if info["lives"] == 0: # real end
-                                break
-                            else:
-                                obs, info = evalenv.reset()
-                                obs = torch.from_numpy(obs).to(device).float()
-                                obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
+                    for eval_round in range(N_EVALS):
+                        if save_video:
+                            video.reset()
+                        obs, info = evalenv.reset()
+                        obs = torch.from_numpy(obs).to(device).float()
+                        obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
+                        evalreward = 0
+                        for _ in count(): # Step count
+                            action = policy_net(obs).max(1)[1]
+                            next_obs, reward, terminated, truncated, info = evalenv.step(action.item())
+                            evalreward += reward
+                            next_obs = torch.from_numpy(next_obs).to(device).float() # (84,84)
+                            next_obs = torch.stack((next_obs,obs[0][0],obs[0][1],obs[0][2])).unsqueeze(0) # (1,4,84,84)
+                            obs = next_obs
+                            if terminated or truncated:
+                                if info["lives"] == 0: # real end
+                                    break
+                                else:
+                                    obs, info = evalenv.reset()
+                                    obs = torch.from_numpy(obs).to(device).float()
+                                    obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
+                        eval_results.append((epoch, evalreward))
+                        if save_video:
+                            video.save(f"{epoch}.mp4")
+                            save_video = False
                     evalenv.close()
-                    video.save(f"{epoch}.mp4")
                     torch.save(policy_net, os.path.join(log_dir,f'model{epoch}_{steps_done}.pth'))
-                    print(f"Eval epoch {epoch}: Reward {evalreward}")
+                    print(f"Eval epoch {epoch}: Reward {mean([r for _, r in eval_results])}")
+                    print(f"time taken to evaluate was {time.time() - t_eval_0}")
                     
                     # Clear cache after evaluation
                     if device.type == "mps":
@@ -444,11 +458,16 @@ for epoch in range(start_epoch, args.epoch):
     #     print("Memory after garbage collection:")
     #     print(f"Memory usage: {get_memory_usage():.2f} MB")
 
+# Print time statistic
 total_time = time.time() - t_0
 hours = int(total_time // 3600)
 minutes = int((total_time % 3600) // 60)
 seconds = int(total_time % 60)
 print(f"\nTotal training time: {hours}h {minutes}m {seconds}s")
+
+# Save eval reward results
+df_eval_results = pd.DataFrame(eval_results, columns=['epoch', 'reward'])
+df_eval_results.to_csv(os.path.join(log_dir, 'eval_rewards.csv'), index=False)
 
 env.close()
 
