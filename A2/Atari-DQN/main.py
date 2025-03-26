@@ -349,9 +349,6 @@ for epoch in range(start_epoch, args.epoch):
             loss_elements = criterion(selected_state_qvalue, tdtarget) # (bs,1)
             loss = (w * loss_elements).mean()
 
-        elif args.alg == "snis": # Expected SARSA without importance sampling
-            tdtarget = ...
-
         else:
             raise ValueError(f"Unknown algorithm: {args.alg}")
 
