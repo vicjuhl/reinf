@@ -58,7 +58,7 @@ EPS_END = 0.05
 EPS_DECAY = 50000
 WARMUP = 1000 # don't update net until WARMUP steps
 N_EVALS = 5
-VIDEO_CYCLE = args.eval_cycle * 10
+VIDEO_CYCLE = args.eval_cycle * 5
 
 # make model specific dir and configurations
 alg_name = args.model
@@ -400,7 +400,7 @@ for epoch in range(args.epoch):
         f.write(f"{output}\n")
 
     # Optionally, clear cache every N epochs
-    if epoch % 100 == 0 and device.type == "mps":
+    if epoch % 50 == 0 and device.type == "mps":
         torch.mps.empty_cache()
 
 # Print time statistic
