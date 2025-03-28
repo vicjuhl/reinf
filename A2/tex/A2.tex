@@ -45,22 +45,39 @@ I used the regular (non-duel) DQN from the repository as a starting point, but m
 The network consists of three 2-d convolutional and two fully connected linear layers. All but the last layer uses Relu activation. The convolutional layers have out-channels [16, 24, 32], kernel sizes [8, 4, 3] and strides [4, 2, 1], respectively. This leads to smaller-resolution, but richer feature representations for each layer. The final layer has 32 ``latent frames'' of size \(7 \times 7\). The fully connected linear layers have out-channels \([128, |\mathcal{A}|]\), \(\mathcal{A}\) being the action space for the game being played. Their role is to distill the rich encoding into first 128 latent features, and finally one estimated value for each action.
 
 \section{Deep Expected SARSA with Weighted Importance Sampling}
-I use a replay buffer into which the realized \((s, a, r, s')\) events are pushed and from which random batches are sampled during model optimization. Due to occasional memory issues, I used a relatively small buffer size of 25,000 steps.
+I implemented three learning algorithms: Q-learning, and Deep Expected SARSA (DES) both with and without weighted importance sampling. The three only differ slightly and are shown together in Algorithm 1.
+I use a replay buffer \(\mathcal{D}\) containing the (up to) 25,000 most recent \((s, a, r, s')\) events (larger buffer sizes led to memory issues on my machine). The game is initially played for 1000 warm-up step taking random actions to populate the buffer. The game is then played a fixed number of times \(K\), learning in every step of each game. In each step, the policy is first updated according to \(\eps\) which decreases exponentially, according to a schedule (decreasing exponentially from 1 to 0.05 over the first 50,000 steps). \(\eps\)-greedy is defined as follows: with probability \(\eps\) the action \(a\) is chosen uniformly with probability \(\frac{1}{|A|}\) and with probability \(1-\eps\) the greedy choice (according to the policy-netwrok \(Q^\pi\)) is chosen. Therefore, \(\pi(a|s) = (1 - \eps) \mathbbm{1}_{\set{a = \arg\max_{a'}\set{Q(s,a')}}} + \frac{\eps}{|A|}\) (I denote it as \(p(a|s)\) to distinct buffer-probabilities from future policies' probabilities). The reward and next state are extracted from the environment according to \((s,a)\), the observed metrics are pushed to the buffer and the environment moves to the next state.
+
+The policy-network \(Q^\pi\) is updated slightly differently, based on which model is used. For \(Q\)-learning, the Bellman target is calculated using the \(Q\)-value of the seemingly best action to take from state \(s'\). For DES, the randomness of the policy is taken into account, so the estimated value of \(s'\) is the expected reward over all the possibly actions, weighted by their respective probabilities. The MSE loss \(l\) is computed and the (weighted) loss is used to update the \(Q^\pi\) with Adam optimization.
+
+So how was the weights \(w\) chosen for DES with weighted importance sampling? Ideally, I would want access to \(l(a) \sim \pi\), but the buffer sample was gathered under the policy at the time \(p\) (\(l\) depends on more than \(a\), but it is not relevant for this discussion). If unbiasedness was my main concern, I could choose \(w'\) such that \(\mathbb{E}_{a \sim \pi} \brks{l(a)} = \mathbb{E}_{a \sim p} \brks{w' l(a)}\). This is satisfied when \(w' = \frac{\pi(a|s)}{p(a|s)}\), since
+\[
+    \mathbb{E}_{a \sim \pi}\brks{l(a)}
+    = \sum_{a} {\pi(a|s) l(a)}
+    = \sum_{a} {\frac{\pi(a|s)}{p(a|s)} p(a|s) l(a)}
+    % = \sum_{a} {w p(a|s) l(a)}
+    = \mathbb{E}_{a \sim p} \brks{\frac{\pi(a|s)}{p(a|s)} l(a)}
+    = \mathbb{E}_{a \sim p} \brks{w' l(a)}.
+\]
+
+But in cases when \(\eps=0.05\) in a game where \(|\mathcal{A}| = 10\), say, and \(a\) was not the greedy choice under \(p\), but is under \(\pi\), this fraction could be \(\frac{(1-0.05) + \nicefrac{0.05}{10}}{\nicefrac{0.05}{10}} \approx \frac{1}{\nicefrac{0.05}{10}} = 200\), whereas cases with somewhat similar \(\pi\) and \(p\) would have \(w' \approx 1\).
+
+For the DES with weighted importance sampling, I weighted each loss term by \(w := \frac{\pi(a|s)}{p(a|s) + \delta}\), where \(\pi(a|s)\) is according to the current policy, \(p(a|s)\) the policy at the time the sample was recorded, and \(\delta\) is a small constant (0.1 in my implementation). To accommodate these extreme events, I added \(\delta = 0.1\) in the denominator, yielding \(w := \frac{\pi(a|s)}{p(a|s) + \delta} \le \frac{1}{0.05 + 0.1} \le 7\).
 
 \begin{algorithm}
     \caption{Learning algorithm. Text specific to \textcolor{dgreen}{Q-learning in green}. Text specific to \textcolor{purple}{Deep Expected SARSA in purple} and \textcolor{blue}{blue when weighted importance sampling is used}.}
     \begin{algorithmic}[1]
         \Require $s_0$ (initial state), $\gamma$ (discount factor)
         \Ensure Updated $Q$ values
+        \State \(\mathcal{D} \gets \emptyset\)
         \State Warm-up: collect 1000 examples of $(s, a, p(a|s), r, s') \rightarrow \mathcal{D}$, using $p(a|s) = \frac{1}{|A|} \quad \forall a, s$
         \State Initialize $Q^\pi$, $Q^-$ with weights \(\theta\) randomly
-        \State \(\mathcal{D} \gets \emptyset\)
         \Repeat
             \State $s \gets \text{env.reset()}$
             \Repeat
                 \State $\pi(\cdot | s) \gets \Call{eps-greedy}{Q_\theta, \eps}$
                 \State $a \sim \pi(\cdot|s)$
-                \State $p(a|s) \gets (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|}$
+                \State $p(a|s) \gets (1 - \eps) \cdot \mathbbm{1}_{\set{a = \arg\max_{a'}\set{Q(s,a')}}} + \frac{\eps}{|A|}$
                 \State $r, s' \gets \text{env.step}(s, a)$
                 \State $\mathcal{D} \cup (s, a, p(a|s), r, s'),\qquad \tilde{\mathcal{D}} \overset{\ita{iid}}{\sim}\mathcal{D}$
                 \State $s \gets s'$
@@ -74,11 +91,12 @@ I use a replay buffer into which the realized \((s, a, r, s')\) events are pushe
         \Procedure{update-Q}{$\mathcal{D}, Q^\pi, Q^-$}
             \State $L \gets \emptyset$
             \For{$(s, a, p(a|s), r, s') \in \mathcal{D}$}
-                \State $\textcolor{dgreen}{\hat{y} \gets r + \gamma \arg\max_{a'}\set{Q^-(s',a')}}$
-                \State $\textcolor{purple}{\hat{y} \gets r + \gamma \sum\limits_{a' \in \mathcal{A}} \pi(a' | s') Q^-(s', a')}$
-                \State $L \cup \textcolor{blue}{\frac{\pi(a|s)}{p(a|s)}}(Q^\pi(s, a) - \hat{y})^2, \qquad \textcolor{blue}{(\pi(a|s) = (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|})}$
+                \State $\textcolor{dgreen}{y \gets r + \gamma \arg\max_{a'}\set{Q^-(s',a')}}$
+                \State $\textcolor{purple}{y \gets r + \gamma \sum\limits_{a' \in \mathcal{A}} \pi(a' | s') Q^-(s', a')}$
+                \State $l \gets (Q^\pi(s, a) - y)^2$
+                \State $L \cup \textcolor{blue}{\parr{\frac{\pi(a|s)}{p(a|s) + \delta}}} l$ %$, \qquad \textcolor{blue}{(\pi(a|s) = (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|})}$
                 \EndFor
-            \State Update $Q^\pi$ parameters \(\theta\) using Adaptive Momentum Gradient Estimation on \(L\)
+            \State Update $Q^\pi$ parameters \(\theta\) using Adaptive Momentum Estimation (Adam) on \(\nabla L\)
             \State \Return $Q^\pi$
         \EndProcedure
     \end{algorithmic}
