@@ -58,13 +58,13 @@ I use a replay buffer into which the realized \((s, a, r, s')\) events are pushe
         \Repeat
             \State $s \gets \text{env.reset()}$
             \Repeat
-                \State $\pi(\cdot | s) \gets \text{eps-greedy}(Q_\theta, \eps)$
+                \State $\pi(\cdot | s) \gets \Call{eps-greedy}{Q_\theta, \eps}$
                 \State $a \sim \pi(\cdot|s)$
                 \State $p(a|s) \gets (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|}$
                 \State $r, s' \gets \text{env.step}(s, a)$
                 \State $\mathcal{D} \cup (s, a, p(a|s), r, s'),\qquad \tilde{\mathcal{D}} \overset{\ita{iid}}{\sim}\mathcal{D}$
                 \State $s \gets s'$
-                \State $Q^\pi \gets \text{update-Q}(\tilde{\mathcal{D}}, Q^\pi, Q^-)$
+                \State $Q^\pi \gets \Call{update-Q}{\tilde{\mathcal{D}}, Q^\pi, Q^-}$
                 \If{1000 steps have been played since last \(Q^-\)-update}
                     \State $Q^- \gets Q^\pi$
                 \EndIf
@@ -72,12 +72,13 @@ I use a replay buffer into which the realized \((s, a, r, s')\) events are pushe
         \Until{end of simulation (fixed epoch)}
         
         \Procedure{update-Q}{$\mathcal{D}, Q^\pi, Q^-$}
+            \State $L \gets \emptyset$
             \For{$(s, a, p(a|s), r, s') \in \mathcal{D}$}
                 \State $\textcolor{dgreen}{\hat{y} \gets r + \gamma \arg\max_{a'}\set{Q^-(s',a')}}$
                 \State $\textcolor{purple}{\hat{y} \gets r + \gamma \sum\limits_{a' \in \mathcal{A}} \pi(a' | s') Q^-(s', a')}$
-                \State $\text{loss} \gets \textcolor{blue}{\frac{\pi(a|s)}{p(a|s)}}(Q^\pi(s, a) - \hat{y})^2, \qquad \textcolor{blue}{(\pi(a|s) = (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|})}$
-                \State Update $Q^\pi$ parameters using Adaptive Momentum Gradient Estimation on loss
-            \EndFor
+                \State $L \cup \textcolor{blue}{\frac{\pi(a|s)}{p(a|s)}}(Q^\pi(s, a) - \hat{y})^2, \qquad \textcolor{blue}{(\pi(a|s) = (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|})}$
+                \EndFor
+            \State Update $Q^\pi$ parameters \(\theta\) using Adaptive Momentum Gradient Estimation on \(L\)
             \State \Return $Q^\pi$
         \EndProcedure
     \end{algorithmic}
