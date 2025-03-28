@@ -1,0 +1,90 @@
+\documentclass{article}
+
+\input{utils/def_command.tex}
+\input{utils/package_import.tex}
+
+% Add margin adjustments
+\usepackage[margin=1in]{geometry}  % Reduced margins
+\usepackage{titling}
+
+% Make title inline and right-aligned
+\pretitle{\begin{flushright}\large}
+\posttitle{: }  % Just a colon and space after title
+\preauthor{}    % No special formatting for author
+\postauthor{, } % Comma and space after author
+\predate{}      % No special formatting for date
+\postdate{\end{flushright}}  % End the right alignment after date
+\setlength{\droptitle}{-4em}  % Reduce space before title
+
+% Reduce title spacing
+\pretitle{\begin{center}\large}
+\posttitle{\end{center}\vspace{-1em}}  % Reduce space after title
+\preauthor{\begin{center}\normalsize}
+\postauthor{\end{center}\vspace{-3em}}  % Reduce space after author
+\predate{\begin{center}\normalsize}
+\postdate{\end{center}\vspace{-0.5em}}  % Reduce space after date
+
+% Add section formatting adjustments
+\usepackage{titlesec}
+\titleformat*{\section}{\large\bfseries}  % Make section headers large and bold
+\titlespacing{\section}{0pt}{1em}{0.5em}  % Reduce spacing before and after section headers
+
+\begin{document}
+\title{DM887 Assignment 2: Game AI with Deep Expected SARSA}
+\author{Victor Kaplan Kjellerup (vikje24)}
+\date{}  % Add this line to prevent date from being printed
+\maketitle
+
+\definecolor{dgreen}{rgb}{0,0.75,0}
+
+My algorithm design is a modification to the repository code found at https://github.com/iewug/Atari-DQN.
+
+\section{Q-network design}
+I used the regular (non-duel) DQN from the repository as a starting point, but made it smaller to save some amount of computational resources. All models compared in the following sections uses the same DQN. The input to the model is a stacked tensor consisting of four observations \(\text{obs}_t, \text{obs}_{t-1}, \text{obs}_{t-2}, \text{obs}_{t-3}\), each being a monochrome frame extended to quadratic size \(84 \times 84\) \(\text{pixels}^2\). The use of four observations provides the network with temporal information necessary to indicate velocity and direction of objects, for instance.
+
+The network consists of three 2-d convolutional and two fully connected linear layers. All but the last layer uses Relu activation. The convolutional layers have out-channels [16, 24, 32], kernel sizes [8, 4, 3] and strides [4, 2, 1], respectively. This leads to smaller-resolution, but richer feature representations for each layer. The final layer has 32 ``latent frames'' of size \(7 \times 7\). The fully connected linear layers have out-channels \([128, |\mathcal{A}|]\), \(\mathcal{A}\) being the action space for the game being played. Their role is to distill the rich encoding into first 128 latent features, and finally one estimated value for each action.
+
+\section{Deep Expected SARSA with Weighted Importance Sampling}
+I use a replay buffer into which the realized \((s, a, r, s')\) events are pushed and from which random batches are sampled during model optimization. Due to occasional memory issues, I used a relatively small buffer size of 25,000 steps.
+
+\begin{algorithm}
+    \caption{Learning algorithm. Text specific to \textcolor{dgreen}{Q-learning in green}. Text specific to \textcolor{purple}{Deep Expected SARSA in purple} and \textcolor{blue}{blue when weighted importance sampling is used}.}
+    \begin{algorithmic}[1]
+        \Require $s_0$ (initial state), $\gamma$ (discount factor)
+        \Ensure Updated $Q$ values
+        \State Warm-up: collect 1000 examples of $(s, a, p(a|s), r, s') \rightarrow \mathcal{D}$, using $p(a|s) = \frac{1}{|A|} \quad \forall a, s$
+        \State Initialize $Q^\pi$, $Q^-$ with weights \(\theta\) randomly
+        \State \(\mathcal{D} \gets \emptyset\)
+        \Repeat
+            \State $s \gets \text{env.reset()}$
+            \Repeat
+                \State $\pi(\cdot | s) \gets \text{eps-greedy}(Q_\theta, \eps)$
+                \State $a \sim \pi(\cdot|s)$
+                \State $p(a|s) \gets (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|}$
+                \State $r, s' \gets \text{env.step}(s, a)$
+                \State $\mathcal{D} \cup (s, a, p(a|s), r, s'),\qquad \tilde{\mathcal{D}} \overset{\ita{iid}}{\sim}\mathcal{D}$
+                \State $s \gets s'$
+                \State $Q^\pi \gets \text{update-Q}(\tilde{\mathcal{D}}, Q^\pi, Q^-)$
+                \If{1000 steps have been played since last \(Q^-\)-update}
+                    \State $Q^- \gets Q^\pi$
+                \EndIf
+            \Until{episode end}
+        \Until{end of simulation (fixed epoch)}
+        
+        \Procedure{update-Q}{$\mathcal{D}, Q^\pi, Q^-$}
+            \For{$(s, a, p(a|s), r, s') \in \mathcal{D}$}
+                \State $\textcolor{dgreen}{\hat{y} \gets r + \gamma \arg\max_{a'}\set{Q^-(s',a')}}$
+                \State $\textcolor{purple}{\hat{y} \gets r + \gamma \sum\limits_{a' \in \mathcal{A}} \pi(a' | s') Q^-(s', a')}$
+                \State $\text{loss} \gets \textcolor{blue}{\frac{\pi(a|s)}{p(a|s)}}(Q^\pi(s, a) - \hat{y})^2, \qquad \textcolor{blue}{(\pi(a|s) = (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|})}$
+                \State Update $Q^\pi$ parameters using Adaptive Momentum Gradient Estimation on loss
+            \EndFor
+            \State \Return $Q^\pi$
+        \EndProcedure
+    \end{algorithmic}
+\end{algorithm}
+
+\section{Comparing methods}
+\section{The effects of weighted importance sampling}
+\section{Limitations and future considerations}
+
+\end{document}
