@@ -45,10 +45,12 @@ I used the regular (non-duel) DQN from the repository as a starting point, but m
 The network consists of three 2-d convolutional and two fully connected linear layers. All but the last layer uses Relu activation. The convolutional layers have out-channels [16, 24, 32], kernel sizes [8, 4, 3] and strides [4, 2, 1], respectively. This leads to smaller-resolution, but richer feature representations for each layer. The final layer has 32 ``latent frames'' of size \(7 \times 7\). The fully connected linear layers have out-channels \([128, |\mathcal{A}|]\), \(\mathcal{A}\) being the action space for the game being played. Their role is to distill the rich encoding into first 128 latent features, and finally one estimated value for each action.
 
 \section{Deep Expected SARSA with Weighted Importance Sampling}
-I implemented three learning algorithms: Q-learning, and Deep Expected SARSA (DES) both with and without weighted importance sampling. The three only differ slightly and are shown together in Algorithm 1.
-I use a replay buffer \(\mathcal{D}\) containing the (up to) 25,000 most recent \((s, a, r, s')\) events (larger buffer sizes led to memory issues on my machine). The game is initially played for 1000 warm-up step taking random actions to populate the buffer. The game is then played a fixed number of times \(K\), learning in every step of each game. In each step, the policy is first updated according to \(\eps\) which decreases exponentially, according to a schedule (decreasing exponentially from 1 to 0.05 over the first 50,000 steps). \(\eps\)-greedy is defined as follows: with probability \(\eps\) the action \(a\) is chosen uniformly with probability \(\frac{1}{|A|}\) and with probability \(1-\eps\) the greedy choice (according to the policy-netwrok \(Q^\pi\)) is chosen. Therefore, \(\pi(a|s) = (1 - \eps) \mathbbm{1}_{\set{a = \arg\max_{a'}\set{Q(s,a')}}} + \frac{\eps}{|A|}\) (I denote it as \(p(a|s)\) to distinct buffer-probabilities from future policies' probabilities). The reward and next state are extracted from the environment according to \((s,a)\), the observed metrics are pushed to the buffer and the environment moves to the next state.
+I implemented three learning algorithms: Q-learning, and Deep Expected SARSA (DES) both with and without weighted importance sampling, see Algorithm 1.
+I use a replay buffer \(\mathcal{D}\) containing the (up to) 25,000 most recent \((s, a, r, s')\) events (larger buffer sizes led to memory issues on my machine). The game is initially played for 1000 warm-up steps taking random actions to populate the buffer. The game is then played a fixed number of times \(K\). In each step, the policy is first updated according to \(\eps\) (decreasing exponentially from 1 to 0.05 over the first 50,000 steps). With probability \(\eps\) the action \(a\) is chosen uniformly with probability \(\frac{1}{|A|}\), and with probability \(1-\eps\) the greedy choice (according to the policy-netwrok \(Q^\pi\)) is chosen. Therefore, \(\pi(a|s) = (1 - \eps) \mathbbm{1}_{\set{a = \arg\max_{a'}\set{Q(s,a')}}} + \frac{\eps}{|A|}\). The reward and next state are extracted according to \((s,a)\), the event is pushed to the buffer, and the environment moves to the next state.
 
-The policy-network \(Q^\pi\) is updated slightly differently, based on which model is used. For \(Q\)-learning, the Bellman target is calculated using the \(Q\)-value of the seemingly best action to take from state \(s'\). For DES, the randomness of the policy is taken into account, so the estimated value of \(s'\) is the expected reward over all the possibly actions, weighted by their respective probabilities. The MSE loss \(l\) is computed and the (weighted) loss is used to update the \(Q^\pi\) with Adam optimization.
+The policy-network \(Q^\pi\) is updated slightly differently, based on which model is used. For \(Q\)-learning, the Bellman target is calculated using the \(Q\)-value of the seemingly best action to take from state \(s'\). For DES, the randomness of the policy is taken into account, so \(\hat{V}(s')\) is the expected reward over all the possibly actions according to their probabilities. The MSE loss \(l\) is computed and the (weighted) loss is used to update the \(Q^\pi\) with Adam optimization.
+
+I use separate networks \(Q^\pi\) and \(Q^-\) for policy-updates and target computations, respectively. This mitigates overestimation bias when actions are selected and evaluated using the same values. \(Q^-\) is updated every 1000 steps as a copy of \(Q^\pi\), preventing feedback loops that amplify errors through bootstrapping.
 
 In DES with weighted importance sampling, the job of the weights \(w\) is to correct each loss term for the fact that some actions collected under the old policy \(p\) can be over/under-represented in the buffer, compared to what we would have seen under \(\pi\). If an action was less likely to occur then, we should expect to sample fewer of them from the buffer, so each example should have larger weight, and vice versa. We cannot sample \(l(a)_{a \sim \pi}\) as desired (other arguments of \(l\) omitted), but we can sample \(l(a)_{a \sim p}\) and use \(w l(a)_{a \sim p}\) in its place. If unbiasedness were the main concern, I could choose weights \(w'\) such that \(\mathbb{E}_{a \sim \pi} \brks{l(a)} = \mathbb{E}_{a \sim p} \brks{w' l(a)}\). This is satisfied when \(w' = \frac{\pi(a|s)}{p(a|s)}\), since
 \[
@@ -79,24 +81,23 @@ In some cases, however, when \(\eps=0.05\) in a game where \(|\mathcal{A}| = 10\
                 \State $r, s' \gets \text{env.step}(s, a)$
                 \State $\mathcal{D} \cup (s, a, p(a|s), r, s'),\qquad \tilde{\mathcal{D}} \overset{\ita{iid}}{\sim}\mathcal{D}$
                 \State $s \gets s'$
-                \State $Q^\pi \gets \Call{update-Q}{\tilde{\mathcal{D}}, Q^\pi, Q^-}$
+                \State $L \gets \emptyset$
+                \For{$(s, a, p(a|s), r, s') \in \mathcal{\tilde{D}}$}
+                    \State $\textcolor{dgreen}{y \gets r + \gamma \arg\max_{a'}\set{Q^-(s',a')}}$
+                    \State $\textcolor{purple}{y \gets r + \gamma \sum\limits_{a' \in \mathcal{A}} \pi(a' | s') Q^-(s', a')}$
+                    \State $L \cup \textcolor{blue}{\parr{\frac{\pi(a|s)}{p(a|s) + \delta}}} (Q^\pi(s, a) - y)^2$ %$, \qquad \textcolor{blue}{(\pi(a|s) = (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|})}$
+                    \EndFor
+                \State Update $Q^\pi$ parameters \(\theta\) using Adaptive Momentum Estimation (Adam) on \(\nabla L\)
                 \If{1000 steps have been played since last \(Q^-\)-update}
                     \State $Q^- \gets Q^\pi$
                 \EndIf
             \Until{episode end}
         \Until{end of simulation (fixed epoch)}
         
-        \Procedure{update-Q}{$\mathcal{D}, Q^\pi, Q^-$}
-            \State $L \gets \emptyset$
-            \For{$(s, a, p(a|s), r, s') \in \mathcal{D}$}
-                \State $\textcolor{dgreen}{y \gets r + \gamma \arg\max_{a'}\set{Q^-(s',a')}}$
-                \State $\textcolor{purple}{y \gets r + \gamma \sum\limits_{a' \in \mathcal{A}} \pi(a' | s') Q^-(s', a')}$
-                \State $l \gets (Q^\pi(s, a) - y)^2$
-                \State $L \cup \textcolor{blue}{\parr{\frac{\pi(a|s)}{p(a|s) + \delta}}} l$ %$, \qquad \textcolor{blue}{(\pi(a|s) = (1 - \eps) \cdot \mathbbm{1}_{\set{a\text{ is the greedy choice}}} + \frac{\eps}{|A|})}$
-                \EndFor
-            \State Update $Q^\pi$ parameters \(\theta\) using Adaptive Momentum Estimation (Adam) on \(\nabla L\)
-            \State \Return $Q^\pi$
-        \EndProcedure
+        % \Procedure{update-Q}{$\mathcal{D}, Q^\pi, Q^-$}
+            
+        %     \State \Return $Q^\pi$
+        % \EndProcedure
     \end{algorithmic}
 \end{algorithm}
 
