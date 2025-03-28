@@ -50,19 +50,17 @@ I use a replay buffer \(\mathcal{D}\) containing the (up to) 25,000 most recent 
 
 The policy-network \(Q^\pi\) is updated slightly differently, based on which model is used. For \(Q\)-learning, the Bellman target is calculated using the \(Q\)-value of the seemingly best action to take from state \(s'\). For DES, the randomness of the policy is taken into account, so the estimated value of \(s'\) is the expected reward over all the possibly actions, weighted by their respective probabilities. The MSE loss \(l\) is computed and the (weighted) loss is used to update the \(Q^\pi\) with Adam optimization.
 
-So how was the weights \(w\) chosen for DES with weighted importance sampling? Ideally, I would want access to \(l(a) \sim \pi\), but the buffer sample was gathered under the policy at the time \(p\) (\(l\) depends on more than \(a\), but it is not relevant for this discussion). If unbiasedness was my main concern, I could choose \(w'\) such that \(\mathbb{E}_{a \sim \pi} \brks{l(a)} = \mathbb{E}_{a \sim p} \brks{w' l(a)}\). This is satisfied when \(w' = \frac{\pi(a|s)}{p(a|s)}\), since
+In DES with weighted importance sampling, the job of the weights \(w\) is to correct each loss term for the fact that some actions collected under the old policy \(p\) can be over/under-represented in the buffer, compared to what we would have seen under \(\pi\). If an action was less likely to occur then, we should expect to sample fewer of them from the buffer, so each example should have larger weight, and vice versa. We cannot sample \(l(a)_{a \sim \pi}\) as desired (other arguments of \(l\) omitted), but we can sample \(l(a)_{a \sim p}\) and use \(w l(a)_{a \sim p}\) in its place. If unbiasedness were the main concern, I could choose weights \(w'\) such that \(\mathbb{E}_{a \sim \pi} \brks{l(a)} = \mathbb{E}_{a \sim p} \brks{w' l(a)}\). This is satisfied when \(w' = \frac{\pi(a|s)}{p(a|s)}\), since
 \[
     \mathbb{E}_{a \sim \pi}\brks{l(a)}
-    = \sum_{a} {\pi(a|s) l(a)}
-    = \sum_{a} {\frac{\pi(a|s)}{p(a|s)} p(a|s) l(a)}
-    % = \sum_{a} {w p(a|s) l(a)}
-    = \mathbb{E}_{a \sim p} \brks{\frac{\pi(a|s)}{p(a|s)} l(a)}
+    = \sum_{a} {\pi(a|s) \ l(a)}
+    = \sum_{a} {\frac{p(a|s) \ \pi(a|s)}{p(a|s)} l(a)}
+    = \sum_{a} {w \ p(a|s) \ l(a)}
+    % = \mathbb{E}_{a \sim p} \brks{\frac{\pi(a|s)}{p(a|s)} l(a)}
     = \mathbb{E}_{a \sim p} \brks{w' l(a)}.
 \]
 
-But in cases when \(\eps=0.05\) in a game where \(|\mathcal{A}| = 10\), say, and \(a\) was not the greedy choice under \(p\), but is under \(\pi\), this fraction could be \(\frac{(1-0.05) + \nicefrac{0.05}{10}}{\nicefrac{0.05}{10}} \approx \frac{1}{\nicefrac{0.05}{10}} = 200\), whereas cases with somewhat similar \(\pi\) and \(p\) would have \(w' \approx 1\).
-
-For the DES with weighted importance sampling, I weighted each loss term by \(w := \frac{\pi(a|s)}{p(a|s) + \delta}\), where \(\pi(a|s)\) is according to the current policy, \(p(a|s)\) the policy at the time the sample was recorded, and \(\delta\) is a small constant (0.1 in my implementation). To accommodate these extreme events, I added \(\delta = 0.1\) in the denominator, yielding \(w := \frac{\pi(a|s)}{p(a|s) + \delta} \le \frac{1}{0.05 + 0.1} \le 7\).
+In some cases, however, when \(\eps=0.05\) in a game where \(|\mathcal{A}| = 10\), say, and \(a\) was not the greedy choice under \(p\), but is under \(\pi\), this fraction could be \(\frac{(1-0.05) + \nicefrac{0.05}{10}}{\nicefrac{0.05}{10}} \ge \frac{0.95}{\nicefrac{0.05}{10}} = 190\), whereas cases with somewhat similar \(\pi\) and \(p\) would have \(w' \approx 1\). To accommodate these extreme events, I accepted some bias by adding \(\delta = 0.1\) in the denominator, yielding \(w := \frac{\pi(a|s)}{p(a|s) + \delta} \le \frac{1}{0.05 + 0.1} \le 7\), limiting variance markedly.
 
 \begin{algorithm}
     \caption{Learning algorithm. Text specific to \textcolor{dgreen}{Q-learning in green}. Text specific to \textcolor{purple}{Deep Expected SARSA in purple} and \textcolor{blue}{blue when weighted importance sampling is used}.}
