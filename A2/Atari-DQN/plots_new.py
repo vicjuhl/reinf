@@ -8,8 +8,13 @@ MODELS = {
     "snis": "e-sarsa",
     "q": "q"
 }
+NICE_MODEL_NAMES = {
+    "sis": "Exp. SARSA with Imp. Sampling",
+    "snis": "Exp. SARSA without Imp. Sampling",
+    "q": "Q-learning"
+}
 GAMES = [
-    # "beamrider",
+    "beamrider",
     "boxing",
     "breakout"
 ]
@@ -95,22 +100,22 @@ def prepare_results_for_plots():
 
 def plot_results():
     tr_res, eval_agg = prepare_results_for_plots()
-    # Plot evaluation results for Boxing Q-learning experiments
-    plt.figure(figsize=(10,6))
     
-    # Filter for boxing and Q-learning model
-    boxing_q = eval_agg[(eval_agg['game'] == 'boxing') & (eval_agg['model'] == 'q')]
-    
-    # Plot one line per experiment
-    for agg in ['min', 'max']:
-        plt.plot(boxing_q['epoch'], boxing_q[f"{agg}_reward"], color="red", linewidth=0.5)
-    plt.plot(boxing_q['epoch'], boxing_q['avg_reward'], color="red", linewidth=3)
-    
-    plt.xlabel('Epochs')
-    plt.ylabel('Evaluation Reward')
-    plt.title('Boxing Q-Learning Evaluation Results')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+    for game in GAMES:
+        plt.figure(figsize=(10,6))
+        for model, col in zip(MODELS.keys(), ["red", "blue", "green"]):
+            model_res = eval_agg[(eval_agg['game'] == game) & (eval_agg['model'] == model)]
+            
+            # Plot one line per aggregation
+            for agg in ['min', 'max']:
+                plt.plot(model_res['epoch'], model_res[f"{agg}_reward"], color=col, linewidth=1, linestyle="--")
+            plt.plot(model_res['epoch'], model_res['avg_reward'], color=col, linewidth=3, label=NICE_MODEL_NAMES[model])
+        
+        plt.xlabel('Epochs')
+        plt.ylabel('Evaluation Reward')
+        plt.title(f'{game} Evaluation Results')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
 plot_results()
