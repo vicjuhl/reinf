@@ -86,9 +86,15 @@ def prepare_results_for_plots():
         return tr_res, eval_agg
     tr_res, eval_res = load_results()
     
-    # Calculate aggregated statistics grouped by game and model
-    eval_agg = eval_res.groupby(['game', 'model', 'epoch']).agg({
-        'reward': ['min', 'max', 'mean']
+    # Calculate aggregated statistics for each game, model, exp_id, epoch (aggregating over five evaluations)
+    eval_agg = eval_res.groupby(['game', 'model', 'exp_id', 'epoch']).agg({
+        'reward': ['mean']
+    }).reset_index()
+    # Flatten column names
+    eval_agg.columns = ['game', 'model', 'exp_id', 'epoch', 'avg_reward']
+
+    eval_agg = eval_agg.groupby(['game', 'model', 'epoch']).agg({
+        'avg_reward': ['min', 'max', 'mean']
     }).reset_index()
     # Flatten column names
     eval_agg.columns = ['game', 'model', 'epoch', 'min_reward', 'max_reward', 'avg_reward']
@@ -101,15 +107,15 @@ def prepare_results_for_plots():
 def plot_results():
     tr_res, eval_agg = prepare_results_for_plots()
     
-    for game in GAMES:
+    for (game, width) in zip(GAMES, [3, 3, 1]):
         plt.figure(figsize=(10,6))
         for model, col in zip(MODELS.keys(), ["red", "blue", "green"]):
             model_res = eval_agg[(eval_agg['game'] == game) & (eval_agg['model'] == model)]
             
             # Plot one line per aggregation
             for agg in ['min', 'max']:
-                plt.plot(model_res['epoch'], model_res[f"{agg}_reward"], color=col, linewidth=1, linestyle="--")
-            plt.plot(model_res['epoch'], model_res['avg_reward'], color=col, linewidth=3, label=NICE_MODEL_NAMES[model])
+                plt.plot(model_res['epoch'], model_res[f"{agg}_reward"], color=col, linewidth=width/3, linestyle="--")
+            plt.plot(model_res['epoch'], model_res['avg_reward'], color=col, linewidth=width, label=NICE_MODEL_NAMES[model])
         
         plt.xlabel('Epochs')
         plt.ylabel('Evaluation Reward')
