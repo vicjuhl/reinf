@@ -18,10 +18,11 @@ import sys
 from plots import create_plots
 import pandas as pd
 from statistics import mean
+import gc
 
 # parser
 parser = argparse.ArgumentParser()
-parser.add_argument('--env-name',default="breakout",type=str,choices=["pong","breakout","boxing"], help="env name")
+parser.add_argument('--env-name',default="breakout",type=str,choices=["pong","breakout","boxing", "beamrider"], help="env name")
 parser.add_argument('--model', default="q", type=str, choices=["q","e-sarsa"], help="dqn model (q-learning, expected SARSA)")
 parser.add_argument('--double',action='store_true', help="double dqn")
 parser.add_argument('--duel',action='store_true', help="dueling dqn")
@@ -101,6 +102,9 @@ if args.env_name == "pong":
 elif args.env_name == "breakout":
     env = gym.make("BreakoutNoFrameskip-v4")
     evalenv = gym.make("BreakoutNoFrameskip-v4")
+elif args.env_name == "beamrider":
+    env = gym.make("BeamRiderNoFrameskip-v4")
+    evalenv = gym.make("BeamRiderNoFrameskip-v4")
 else:
     env = gym.make("BoxingNoFrameskip-v4")
     evalenv = gym.make("BoxingNoFrameskip-v4")
@@ -176,7 +180,7 @@ avglosslist = []
 eval_results = []
 
 # Initialize steps_done
-steps_done = args.steps_done if args.steps_done is not None else 0
+steps_done = 0
 eps_threshold = EPS_START
 
 def p_of_a_given_s(is_greedy):
@@ -352,6 +356,7 @@ for epoch in range(args.epoch):
                     for eval_round in range(N_EVALS):
                         if save_video:
                             video.reset()
+                            torch.save(policy_net, os.path.join(log_dir,f'model{epoch}_{steps_done}.pth'))
                         obs, info = evalenv.reset()
                         obs = torch.from_numpy(obs).to(device).float()
                         obs = torch.stack((obs,obs,obs,obs)).unsqueeze(0)
@@ -375,11 +380,11 @@ for epoch in range(args.epoch):
                             video.save(f"{epoch}.mp4")
                             save_video = False
                     evalenv.close()
-                    torch.save(policy_net, os.path.join(log_dir,f'model{epoch}_{steps_done}.pth'))
                     print(f"Eval epoch {epoch}: Reward {mean([r for _, r in eval_results])}")
                     print(f"time taken to evaluate was {time.time() - t_eval_0}")
                     
                     # Clear cache after evaluation
+                    gc.collect()
                     if device.type == "mps":
                         torch.mps.empty_cache()
             break
