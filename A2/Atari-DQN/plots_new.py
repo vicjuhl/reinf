@@ -42,6 +42,7 @@ def load_inner_results(game: str, model: str, exp_id: int) -> tuple[dict, pd.Dat
     return results_dict, eval_rewards_df
 
 def load_results():
+
     tr_results = []
     eval_results = []
     for game in GAMES:
@@ -69,6 +70,15 @@ def load_results():
     return df_tr_res, df_eval_res
 
 def prepare_results_for_plots():
+    # Check if preprocessed results exist
+    results_dir = Path("final_results")
+    tr_path = results_dir / "training_results_prep.csv" 
+    eval_path = results_dir / "eval_agg_results.csv"
+    
+    if tr_path.exists() and eval_path.exists():
+        tr_res = pd.read_csv(tr_path)
+        eval_agg = pd.read_csv(eval_path)
+        return tr_res, eval_agg
     tr_res, eval_res = load_results()
     
     # Calculate aggregated statistics grouped by game and model
@@ -78,7 +88,9 @@ def prepare_results_for_plots():
     # Flatten column names
     eval_agg.columns = ['game', 'model', 'epoch', 'min_reward', 'max_reward', 'avg_reward']
     
-    print(tr_res, eval_agg)
+    eval_path.parent.mkdir(exist_ok=True)
+    eval_agg.to_csv(eval_path)
+    tr_res.to_csv(tr_path)
     return tr_res, eval_agg
 
 def plot_results():
