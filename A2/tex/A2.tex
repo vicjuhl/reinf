@@ -39,20 +39,20 @@
 
 
 
-\section{Q-network design}
+\section{\(Q\)-network design}
 My algorithm design builds on the repository code found at https://github.com/iewug/Atari-DQN. For all models, I used the regular DQN from the repository as a starting point, but made it smaller to save computational resources. The input to the model is a stacked tensor consisting of four observations \(\text{obs}_t, \text{obs}_{t-1}, \text{obs}_{t-2}, \text{obs}_{t-3}\), each being a monochrome frame extended to quadratic size \(84 \times 84\) \(\text{pixels}^2\). The use of four observations provides the network with crucial temporal information.
 
 The network consists of three 2-d convolutional and two fully connected linear layers. All but the last layer uses Relu activation. The convolutional layers have out-channels [16, 24, 32], kernel sizes [8, 4, 3] and strides [4, 2, 1], respectively. This leads to smaller-resolution, but richer feature representations for each layer. The deepest convolutional layer has 32 ``latent frames'' of size \(7 \times 7\). The fully connected linear layers have out-channels \([128, |\mathcal{A}|]\), \(\mathcal{A}\) being the action space for the current game. Their role is to distill the rich encoding into 128 latent features, and finally one estimated value for each \(a \in \mathcal{A}\).
 
-\section{Deep Expected SARSA with Weighted Importance Sampling}
-I implemented three learning algorithms: Q-learning, and Deep Expected SARSA (DES) both with and without weighted importance sampling, see Algorithm 1.
-I use a replay buffer \(\mathcal{D}\) containing the (up to) 25,000 most recent \((s, a, r, s')\) events (larger buffer sizes led to memory issues on my machine). The game is initially played for 1000 warm-up steps taking random actions to populate the buffer. The game is then played a fixed number of times \(K\). In each step, the policy is first updated according to \(\eps\) (decreasing exponentially from 1 to 0.05 over the first 50,000 steps). With probability \(\eps\) the action \(a\) is chosen uniformly with probability \(\frac{1}{|A|}\), and with probability \(1-\eps\) the greedy choice (according to the policy-netwrok \(Q^\pi\)) is chosen. Therefore, \(\pi(a|s) = (1 - \eps) \mathbbm{1}_{\set{a = \arg\max_{a'}\set{Q(s,a')}}} + \frac{\eps}{|A|}\). The reward and next state are extracted according to \((s,a)\), the event is pushed to the buffer, and the environment moves to the next state.
+\section{Description of learning algorithms}
+I implemented three learning algorithms: \(Q\)-learning, and Deep Expected SARSA (DES) both with and without weighted importance sampling (WIS), see Algorithm 1.
+For all models, I used a replay buffer \(\mathcal{D}\) containing the (up to) 25,000 most recent \((s, a, r, s')\) events (larger buffer sizes led to memory issues on my machine). Each game is initially played for 1000 warm-up steps taking random actions to populate the buffer. The game is then played a fixed number of times \(K\). In each step, the policy is first updated according to \(\eps\) (decreasing exponentially from 1 to 0.05). With probability \(\eps\) the action \(a\) is chosen uniformly with probability \(\frac{1}{|A|}\), and with probability \(1-\eps\) the greedy choice (according to the policy-netwrok \(Q^\pi\)) is chosen. Therefore, \(\pi(a|s) = (1 - \eps) \mathbbm{1}_{\set{a = \arg\max_{a'}\set{Q(s,a')}}} + \frac{\eps}{|A|}\). The reward and next state are extracted according to \((s,a)\), the event is pushed to the buffer, and the environment moves to the next state.
 
 The policy-network \(Q^\pi\) is updated slightly differently, based on which model is used. For \(Q\)-learning, the Bellman target is calculated using the \(Q\)-value of the seemingly best action to take from state \(s'\). For DES, the randomness of the policy is taken into account, so \(\hat{V}(s')\) is the expected reward over all the possibly actions according to their probabilities. The MSE loss \(l\) is computed and the (weighted) loss is used to update the \(Q^\pi\) with Adam optimization.
 
-I use separate networks \(Q^\pi\) and \(Q^-\) for policy-updates and target computations, respectively. This mitigates overestimation bias when actions are selected and evaluated using the same values. \(Q^-\) is updated every 1000 steps as a copy of \(Q^\pi\), preventing feedback loops that amplify errors through bootstrapping.
+I use separate networks \(Q^\pi\) and \(Q^-\) for policy-updates and target computations, respectively (double \(Q\)-network). This diminishes overestimation bias arising when actions are selected and evaluated using the same values. \(Q^-\) is updated every 1000 steps as a copy of \(Q^\pi\), preventing feedback loops that amplify errors through bootstrapping.
 
-In DES with weighted importance sampling, the job of the weights \(w\) is to correct each loss term for the fact that some actions collected under the old policy \(p\) can be over/under-represented in the buffer, compared to what we would have seen under \(\pi\). If an action was less likely to occur then, we should expect to sample fewer of them from the buffer, so each example should have larger weight, and vice versa. We cannot sample \(l(a)_{a \sim \pi}\) as desired (other arguments of \(l\) omitted), but we can sample \(l(a)_{a \sim p}\) and use \(w l(a)_{a \sim p}\) in its place. If unbiasedness were the main concern, I could choose weights \(w' = \frac{\pi(a|s)}{p(a|s)}\), since
+In DES with WIS, the job of the weights \(w\) is to correct each loss term for the fact that some actions collected under the old policy \(p\) can be over/under-represented in the buffer, compared to what we would have seen under \(\pi\). If an action was less likely to occur then, we should expect to sample fewer of them from the buffer, so each example should have larger weight, and vice versa. We cannot sample \(l(a)_{a \sim \pi}\) as desired (other arguments of \(l\) omitted), but we can sample \(l(a)_{a \sim p}\) and use \(w l(a)_{a \sim p}\) in its place. If unbiasedness were the main concern, I could choose weights \(w' = \frac{\pi(a|s)}{p(a|s)}\), since
 \[
     \mathbb{E}_{a \sim \pi}\brks{l(a)}
     = \sum_{a} {\pi(a|s) \ l(a)}
@@ -65,7 +65,7 @@ In DES with weighted importance sampling, the job of the weights \(w\) is to cor
 In some cases, however, when \(\eps=0.05\) in a game where \(|\mathcal{A}| = 10\), say, and \(a\) was not the greedy choice under \(p\), but is under \(\pi\), this fraction could be \(\frac{(1-0.05) + \nicefrac{0.05}{10}}{\nicefrac{0.05}{10}} \ge \frac{0.95}{\nicefrac{0.05}{10}} = 190\), compared to cases with \(\pi \approx p\) where \(w' \approx 1\). To accommodate these extreme events, I accepted some bias by adding \(\delta = 0.1\) in the denominator, yielding \(w := \frac{\pi(a|s)}{p(a|s) + \delta} \le \frac{1}{0.05 + 0.1} \le 7\), limiting variance markedly.
 
 \begin{algorithm}
-    \caption{Learning algorithm. Text specific to \textcolor{dgreen}{Q-learning in green}. Text specific to \textcolor{purple}{Deep Expected SARSA in purple} and \textcolor{blue}{blue when weighted importance sampling is used}.}
+    \caption{Learning algorithm. Text specific to \textcolor{dgreen}{\(Q\)-learning in green}. Text specific to \textcolor{purple}{Deep Expected SARSA in purple} and \textcolor{blue}{blue when weighted importance sampling is used}.}
     \begin{algorithmic}
         \Require $s_0$ (initial state), $\gamma$ (discount factor)
         \Ensure Updated $Q$ values
@@ -96,8 +96,38 @@ In some cases, however, when \(\eps=0.05\) in a game where \(|\mathcal{A}| = 10\
     \end{algorithmic}
 \end{algorithm}
 
-\section{Comparing methods}
+\section{Comparing models}
+I trained each model TODO times for the games Beam Rider, Boxing, and Breakout. During each training, I evaluated the model five times for every ten epochs (games played). Random seeds ensured that all three model types were trained and tested under equal conditions. Figure~\ref{fig:results} show that any performance difference between the different model types is undetectable. Whether using \(Q\)-learning or DES with or without WIS does not seem to make a different, based on these experiments. They all show signs of learning for all the games (although boxing skills seem to be improving the slowest), but roughly to the same extent.
+
+I was initially surprised that \(Q\)-learning and DES performed so equally. However, with a replay buffer, they are both off-policy (usually, whether they are on- or off-policy is their main difference), and since they are sampling from the same buffer, their target (max\((Q)\) vs. \(\E(Q)\)) might not differ much. The use of a double \(Q\)-network might also remedy one of \(Q\)-learning's main disadvantages, its overestimation bias, making them more equal.
+
+\begin{figure}[h]
+    \centering
+    \begin{subfigure}[b]{0.7\textwidth}
+        \includegraphics[width=\textwidth]{figures/beamrider.png}
+    \end{subfigure}
+    
+    \vspace{1em}  % Add some vertical space between figures
+    
+    \begin{subfigure}[b]{0.7\textwidth}
+        \includegraphics[width=\textwidth]{figures/boxing.png}
+    \end{subfigure}
+    
+    \vspace{1em}  % Add some vertical space between figures
+    
+    \begin{subfigure}[b]{0.7\textwidth}
+        \includegraphics[width=\textwidth]{figures/breakout.png}
+    \end{subfigure} 
+    \caption{Evaluation rewards during training for each game and model. Each line shows the mean reward across TODO training runs and five epoch evaluations.}
+    \label{fig:results}
+\end{figure}
+
 \section{The effects of weighted importance sampling}
+As mentioned, any effect of WIS is undetectable from the results. This was initially surprising to me since, theoretically, certain action might be misrepresented in their sampling frequencies. I imagine that my relatively small buffer might explain some of this. Had the buffer been larger, the mismatch between the then-policy and now-policy would increase, demanding more importance correction. Entire training passes took between 175,000 and 450,000 steps, so 25,000 samples in the buffer is rather small, and the unweighted model would still make informed corrections to \(\theta\), although possibly not well-scaled.
+
 \section{Limitations and future considerations}
+Due to limited computation time, I stopped all games before convergence (my entire simulation time was approximately 50 hours). This limits how much I can conclude, since the models might not converge at the same playing level, even though their early learning, which I report, seems equal.
+
+One possibility I did not explore was to use dueling \(Q\)-networks, in which \(Q(s,a)\) is split into the value \(V(s,a)\) plus the relative advantage \(A(s,a)\) of taking action \(a\), compared to the mean. This can emphasize learning of the state values and may be useful when different actions have somewhat similar advantages. In Breakout, for instance, when the ball is far away, or in Boxing, if the two boxers are not within reach of each other, it might not matter what the agent does, because it can position itself later. Dueling \(Q\)-networks might, however, have complicated the math underlying the weighted importance sampling in ways I am not quite sure of.
 
 \end{document}

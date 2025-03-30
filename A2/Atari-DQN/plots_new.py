@@ -106,22 +106,24 @@ def prepare_results_for_plots():
 
 def plot_results():
     tr_res, eval_agg = prepare_results_for_plots()
-    
-    for (game, width) in zip(GAMES, [3, 3, 1]):
+    fig_path = Path("plots")
+    fig_path.mkdir(exist_ok=True)
+
+    for (game, width) in zip(GAMES, [2, 2, 1]):
         plt.figure(figsize=(10,6))
         for model, col in zip(MODELS.keys(), ["red", "blue", "green"]):
             model_res = eval_agg[(eval_agg['game'] == game) & (eval_agg['model'] == model)]
             
             # Plot one line per aggregation
-            for agg in ['min', 'max']:
-                plt.plot(model_res['epoch'], model_res[f"{agg}_reward"], color=col, linewidth=width/3, linestyle="--")
+            # for agg in ['min', 'max']:
+            #     plt.plot(model_res['epoch'], model_res[f"{agg}_reward"], color=col, linewidth=width/3, linestyle="--")
             plt.plot(model_res['epoch'], model_res['avg_reward'], color=col, linewidth=width, label=NICE_MODEL_NAMES[model])
         
-        plt.xlabel('Epochs')
-        plt.ylabel('Evaluation Reward')
-        plt.title(f'{game} Evaluation Results')
-        plt.legend()
+        plt.xlabel('Epochs', fontsize=16)
+        plt.ylabel('Average Evaluation Reward', fontsize=16)
+        plt.title(f'{str.upper(game)}', fontsize=18)
+        plt.legend(fontsize=16)
         plt.grid(True)
-        plt.show()
+        plt.savefig(fig_path / f"{game}.png")
 
 plot_results()
