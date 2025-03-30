@@ -15,7 +15,6 @@ from collections import deque
 import time
 import json
 import sys
-from plots import create_plots
 import pandas as pd
 from statistics import mean
 import gc
@@ -32,7 +31,6 @@ parser.add_argument('--epoch', default=10001, type=int, help="training epoch")
 parser.add_argument('--batch-size', default=32, type=int, help="batch size")
 parser.add_argument('--eval-cycle', default=500, type=int, help="evaluation cycle")
 parser.add_argument('--exp_id', type=int, help="experiement identifier")
-parser.add_argument('--sim', action='store_true', help="whether to simulate (not set goes straight to plotting for the current setting)")
 parser.add_argument('--smaller', action='store_true', help="make neural network smaller for computational efficiency")
 args = parser.parse_args()
 
@@ -76,10 +74,6 @@ log_path = os.path.join(log_dir,"log.txt")
 json_path = os.path.join(log_dir,"results.json")
 # video
 video = VideoRecorder(log_dir)
-
-if not args.sim:
-    create_plots(log_dir)
-    sys.exit(0)
 
 def set_seeds(seed):
     """Set all random seeds for reproducibility"""
@@ -429,5 +423,3 @@ results = {
 }
 with open(json_path, 'w') as f:
     json.dump(results, f)
-
-create_plots(log_dir)
