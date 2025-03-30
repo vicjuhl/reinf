@@ -1,4 +1,4 @@
-To reproduce the reported results, please run
+To reproduce the reported results, please run (but expect 15-200h run time, depending on hardware)
 
   bash run_more.sh
 
