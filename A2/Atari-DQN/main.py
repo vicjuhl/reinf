@@ -32,7 +32,7 @@ parser.add_argument('--epoch', default=10001, type=int, help="training epoch")
 parser.add_argument('--batch-size', default=32, type=int, help="batch size")
 parser.add_argument('--eval-cycle', default=500, type=int, help="evaluation cycle")
 parser.add_argument('--exp_id', type=int, help="experiement identifier")
-parser.add_argument('--sim', action='store_true', help="whether to simulate (not set goes straight to plotting)")
+parser.add_argument('--sim', action='store_true', help="whether to simulate (not set goes straight to plotting for the current setting)")
 parser.add_argument('--smaller', action='store_true', help="make neural network smaller for computational efficiency")
 args = parser.parse_args()
 
