@@ -89,28 +89,24 @@ In some cases, however, when \(\eps=0.05\) in a game where \(|\mathcal{A}| = 10\
 \end{algorithm}
 
 \section{Comparing models}
-I trained each model six times for the games Beam Rider, Boxing, and Breakout. During each training, I evaluated the model five times for every ten epochs (games played). Random seeds ensured that all three model types were trained and tested under equal conditions for each experiement. Figure~\ref{fig:results} shows that they all show signs of learning for all the games (although less clearly for boxing, except for the early jump), and that any performance difference between the different model types is nearly undetectable. Whether using \(Q\)-learning or DES, and whether WIS is used do not seem to make much of a difference, based on these experiments. \(Q\)-learning might seem slightly sooner to learn, but around the final epochs, they all seem roughly equal.
+I trained each model six times for the games Beam Rider, Boxing, and Breakout. During each training, I evaluated the model five times for every ten epochs (games played). Random seeds ensured that all three model types were trained and tested under equal conditions for each experiement. Figure~\ref{fig:results} shows that they all show signs of learning for all the games (although less clearly for boxing, except for the early jump), and that any performance difference between the different model types is not striking. The biggest difference I observe, is that \(Q\)-learning seems to learn Breakout, and possibly Boxing, slightly quicker, while ending with a worse Breakout performance on average. This performance drop is due to one of the six \(Q\)-learning models not reaching the ``breakthrough'' the all other models experienced.
 
 I was initially surprised that \(Q\)-learning and DES performed so equally. However, using a replay buffer, they are both off-policy (on-/off-policy is otherwise their most important difference). The use of a double \(Q\)-network might also remedy one of \(Q\)-learning's main disadvantages, its overestimation bias, making them more equal.
 
 \begin{figure}[h]
     \centering
-    \begin{subfigure}[b]{0.7\textwidth}
+    \begin{subfigure}[b]{0.69\textwidth}
         \includegraphics[width=\textwidth]{figures/beamrider.png}
     \end{subfigure}
     
-    \vspace{1em}  % Add some vertical space between figures
-    
-    \begin{subfigure}[b]{0.7\textwidth}
+    \begin{subfigure}[b]{0.69\textwidth}
         \includegraphics[width=\textwidth]{figures/boxing.png}
     \end{subfigure}
     
-    \vspace{1em}  % Add some vertical space between figures
-    
-    \begin{subfigure}[b]{0.7\textwidth}
+    \begin{subfigure}[b]{0.69\textwidth}
         \includegraphics[width=\textwidth]{figures/breakout.png}
     \end{subfigure} 
-    \caption{Evaluation rewards during training for each game and model. Each line shows the mean reward across six training runs and five epoch evaluations.}
+    \caption{Evaluation rewards performed every ten epochs during training for each game and model. The results were first aggregated to the average score \(r_\text{avg}\) for each training run, evaluation round (of five simulations). The average (full line), minimum (lower, dotted line), and maximum (upper, dotted line) of \(r_\text{avg}\) across the six training passes is shown here. In Breakout, the minimum plot for \(Q\)-learning is due to one single training pass essentially not learning the game, affecting the average which was otherwise not significantly worse than its competitors'.}
     \label{fig:results}
 \end{figure}
 
