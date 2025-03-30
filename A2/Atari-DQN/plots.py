@@ -52,7 +52,7 @@ def load_results():
     eval_results = []
     for game in GAMES:
         for model_short, model_long in MODELS.items():
-            for exp_id in (1, 2, 3, 4, 5):
+            for exp_id in (1, 2, 3, 4, 5, 6):
                 tr_res, ev_res = load_inner_results(game, model_long, exp_id)
                 for t in range(len(tr_res["rewards"])):
                     tr_results.append((
@@ -115,8 +115,8 @@ def plot_results():
             model_res = eval_agg[(eval_agg['game'] == game) & (eval_agg['model'] == model)]
             
             # Plot one line per aggregation
-            # for agg in ['min', 'max']:
-            #     plt.plot(model_res['epoch'], model_res[f"{agg}_reward"], color=col, linewidth=width/3, linestyle="--")
+            for agg in ['min', 'max']:
+                plt.plot(model_res['epoch'], model_res[f"{agg}_reward"], color=col, linewidth=width/3, linestyle="--")
             plt.plot(model_res['epoch'], model_res['avg_reward'], color=col, linewidth=width, label=NICE_MODEL_NAMES[model])
         
         plt.xlabel('Epochs', fontsize=16)
