@@ -52,7 +52,7 @@ def load_results():
     eval_results = []
     for game in GAMES:
         for model_short, model_long in MODELS.items():
-            for exp_id in (1, 2, 3):
+            for exp_id in (1, 2, 3, 4, 5):
                 tr_res, ev_res = load_inner_results(game, model_long, exp_id)
                 for t in range(len(tr_res["rewards"])):
                     tr_results.append((
