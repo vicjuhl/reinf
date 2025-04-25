@@ -19,7 +19,7 @@ print(f"Using device: {device}")
 
 ###########################################################################
 #
-#                           General methods
+#                           General functions
 #
 ###########################################################################
 def updateNet(target, source, tau):    
@@ -28,11 +28,16 @@ def updateNet(target, source, tau):
             target_param.data * (1.0 - tau) + source_param.data * tau
         )
 
-def normalize_angle(x):
-    return (((x+np.pi) % (2*np.pi)) - np.pi)
+def reset_env(self):
+    obs, info = self.env.reset()
+    if isinstance(obs, tuple):
+        state = obs[0]  # For environments like Pendulum-v1 which return a tuple
+    else:
+        state = obs
+    return state
 
-def scale_action(a, min, max):
-    return (0.5*(a+1.0)*(max-min) + min)
+def normalize_angle(x):
+    return (((x + np.pi) % (2 * np.pi)) - np.pi)
 
 ###########################################################################
 #
@@ -153,7 +158,7 @@ class System:
         self.type = system
        
         self.s_dim = self.env.observation_space.shape[0]               
-        if not original_state and system == 'Pendulum-v0':
+        if not original_state and system == 'Pendulum-v1':
             self.s_dim -= 1
         self.a_dim = self.env.action_space.shape[0] 
         self.sa_dim = self.s_dim + self.a_dim
@@ -177,8 +182,8 @@ class System:
     def initialization(self):
         event = np.empty(self.e_dim)
         if self.hard_start:
-            initial_state = np.array([-np.pi,0.0])
-            self.env.state = initial_state
+            obs = np.array([-np.pi,0.0,0.0])
+            self.env.state = obs
         else:
             obs, info = self.env.reset()
         if self.original_state:
@@ -188,7 +193,7 @@ class System:
         
         for init_step in range(0, self.init_steps):            
             action = np.random.rand(self.a_dim)*2 - 1
-            obs, reward, terminated, truncated, _ = self.env.step(scale_action(action, self.min_action, self.max_action))
+            obs, reward, terminated, truncated, _ = self.env.step(self.scale_action(action))
             if self.original_state:
                 next_state = obs
             else:
@@ -202,6 +207,16 @@ class System:
 
             self.agent.memorize(event)
             state = np.copy(next_state)
+
+    def scale_action(self, a):
+        return (0.5 * (a + 1.0) * (self.max_action - self.min_action) + self.min_action)
+
+    def process_state(self, state):
+        if self.original_state:
+            return state
+        else:
+            state[0] = normalize_angle(state[0])  # Normalize angle if needed
+            return state
     
     def interaction(self, learn=True, remember=True):   
         event = np.empty(self.e_dim)
@@ -213,13 +228,11 @@ class System:
             state[0] = normalize_angle(state[0])
 
         for env_step in range(0, self.env_steps):
-              
+            
             cuda_state = torch.FloatTensor(state).unsqueeze(0).to(device)         
             action = self.agent.act(cuda_state, explore=learn)
-            
-            obs, reward, terminated, truncated, _ = self.env.step(
-                scale_action(action.squeeze().cpu().numpy(), self.min_action, self.max_action)
-            )
+            scaled_action = self.scale_action(action.detach().cpu().numpy().flatten())
+            obs, reward, terminated, truncated, _ = self.env.step(scaled_action)
             done = terminated or truncated
 
             if done: #TODO
