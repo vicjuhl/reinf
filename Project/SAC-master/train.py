@@ -1,9 +1,7 @@
 import multiprocessing as mp
 import json
-import numpy as np
 import pickle
 from system import System  # wherever your System class lives
-import system
 from pathlib import Path
 
 # Get the directory where this script is located
