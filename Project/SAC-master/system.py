@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.optim as optim
-import gymnasium as gym
+import gymnasium as gym                 #going to the gym
 from nets import Memory, v_valueNet, q_valueNet, policyNet
 
 from sys import stdout
