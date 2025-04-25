@@ -286,7 +286,7 @@ class System:
             # if epsd_mean_reward > max_mean_reward:
             #     pickle.dump(self,open(self.type+'.p','wb'))
             
-            epsd_mean_reward /=epsd_steps            
+            epsd_mean_reward /= epsd_steps            
             mean_rewards.append(epsd_mean_reward)
 
             min_mean_reward = np.min([epsd_mean_reward, min_mean_reward])
