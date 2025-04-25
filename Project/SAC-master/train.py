@@ -2,12 +2,12 @@ import pickle
 import numpy as np
 from system import System
 n_test = 6
-system_type = 'Hopper-v2'
+system_type = 'Hopper-v4'
 system = System(system=system_type, reward_scale=100)
-tr_epsds = 200
-epsd_steps = 1000
+tr_epsds = 10
+epsd_steps = 50
 mean_rewards = []
-for i in range(1,6):
+for i in range(1,3):
     if i == 1:
         mean_rewards.append(system.train_agent(tr_epsds, epsd_steps))        
     else:

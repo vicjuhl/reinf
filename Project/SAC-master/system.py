@@ -1,15 +1,21 @@
 import numpy as np
 import torch
 import torch.optim as optim
-import gym
+import gymnasium as gym
 from nets import Memory, v_valueNet, q_valueNet, policyNet
 
 from sys import stdout
 import pickle
 import time
 
-use_cuda = torch.cuda.is_available()
-device   = torch.device("cuda" if use_cuda else "cpu")
+# Device configuration
+device = (
+    torch.device("mps") if torch.backends.mps.is_available()
+    else torch.device("cuda") if torch.cuda.is_available()
+    else torch.device("cpu")
+)
+device = "cpu"
+print(f"Using device: {device}")
 
 ###########################################################################
 #
@@ -141,9 +147,9 @@ class Agent:
 #-------------------------------------------------------------
 class System:
     def __init__(self, memory_capacity = 200000, env_steps=1, grad_steps=1, init_steps=256, reward_scale = 25,
-        temperature=1.0, soft_lr=5e-3, batch_size=256, hard_start = False, original_state=True, system='Hopper-v2'): # 'Pendulum-v0', 'Hopper-v2', 'HalfCheetah-v2', 'Swimmer-v2'
-        self.env = gym.make(system).unwrapped
-        self.env.reset()
+        temperature=1.0, soft_lr=5e-3, batch_size=256, hard_start = False, original_state=True, system='Hopper-v4'): # 'Pendulum-v0', 'Hopper-v2', 'HalfCheetah-v2', 'Swimmer-v2'
+        self.env = gym.make(system)
+        self.env.reset(seed=None)
         self.type = system
        
         self.s_dim = self.env.observation_space.shape[0]               
@@ -174,17 +180,17 @@ class System:
             initial_state = np.array([-np.pi,0.0])
             self.env.state = initial_state
         else:
-            self.env.reset()
+            obs, info = self.env.reset()
         if self.original_state:
-            state = self.env._get_obs()
+            state = obs
         else:
             state = self.env.state 
         
         for init_step in range(0, self.init_steps):            
             action = np.random.rand(self.a_dim)*2 - 1
-            reward = self.env.step(scale_action(action, self.min_action, self.max_action))[1]
+            obs, reward, terminated, truncated, _ = self.env.step(scale_action(action, self.min_action, self.max_action))
             if self.original_state:
-                next_state = self.env._get_obs()
+                next_state = obs
             else:
                 next_state = self.env.state
                 next_state[0] = normalize_angle(next_state[0])
@@ -200,7 +206,8 @@ class System:
     def interaction(self, learn=True, remember=True):   
         event = np.empty(self.e_dim)
         if self.original_state:
-            state = self.env._get_obs()
+            obs, info = self.env.reset()
+            state = obs
         else:            
             state = self.env.state 
             state[0] = normalize_angle(state[0])
@@ -210,10 +217,16 @@ class System:
             cuda_state = torch.FloatTensor(state).unsqueeze(0).to(device)         
             action = self.agent.act(cuda_state, explore=learn)
             
-            reward = self.env.step(scale_action(action, self.min_action, self.max_action))[1]
+            obs, reward, terminated, truncated, _ = self.env.step(
+                scale_action(action.squeeze().cpu().numpy(), self.min_action, self.max_action)
+            )
+            done = terminated or truncated
+
+            if done: #TODO
+                pass
 
             if self.original_state:
-                next_state = self.env._get_obs()
+                next_state = obs
             else:
                 next_state = self.env.state
                 next_state[0] = normalize_angle(next_state[0])
@@ -255,20 +268,20 @@ class System:
                 initial_state = np.array([-np.pi,0.0])
                 self.env.state = initial_state
             else:
-                self.env.reset()
+                obs, info = self.env.reset()
             
             for epsd_step in range(0, epsd_steps):
-                    if len(self.agent.memory.data) < self.batch_size:
-                        event = self.interaction(learn=False)
-                    else:
-                        event = self.interaction()
-                    r = event[self.sa_dim]
+                if len(self.agent.memory.data) < self.batch_size:
+                    event = self.interaction(learn=False)
+                else:
+                    event = self.interaction()
+                r = event[self.sa_dim]
 
-                    min_reward = np.min([r, min_reward])
-                    max_reward = np.max([r, max_reward])
-                    epsd_min_reward = np.min([r, epsd_min_reward])                        
-                    epsd_max_reward = np.max([r, epsd_max_reward])                        
-                    epsd_mean_reward += r           
+                min_reward = np.min([r, min_reward])
+                max_reward = np.max([r, max_reward])
+                epsd_min_reward = np.min([r, epsd_min_reward])                        
+                epsd_max_reward = np.max([r, epsd_max_reward])                        
+                epsd_mean_reward += r           
             
             # if epsd_mean_reward > max_mean_reward:
             #     pickle.dump(self,open(self.type+'.p','wb'))
