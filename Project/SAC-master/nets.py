@@ -207,7 +207,7 @@ class policyNet(nn.Module):
     Methods:
     forward -- calculates otput of network
     '''
-    def __init__(self, input_dim, output_dim, min_log_stdev=-30, max_log_stdev=30):
+    def __init__(self, input_dim, output_dim, min_log_stdev=-5, max_log_stdev=2):
         '''
         Descrption:
         Creates the three linear layers of the net
@@ -259,6 +259,6 @@ class policyNet(nn.Module):
         m, log_stdev = self(s)
         stdev = log_stdev.exp()
         u = m + stdev*torch.randn_like(m)
-        a = torch.tanh(u)
+        a = torch.tanh(u).cpu()
         llhood = (Normal(m, stdev).log_prob(u) - torch.log(torch.clamp(1 - a.pow(2), 1e-6, 1.0))).sum(dim=1, keepdim=True)
         return a, llhood
