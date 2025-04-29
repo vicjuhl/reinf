@@ -92,7 +92,7 @@ class Agent:
 
     def act(self, state, explore=True):
         with torch.no_grad():
-            action = self.actor.sample_action(state)            
+            action = self.actor.sample_action(state)        
             return action
     
     def memorize(self, event):
@@ -176,8 +176,15 @@ class System:
         self.temperature = temperature
         self.reward_scale = reward_scale
 
-        self.agent = Agent(s_dim=self.s_dim, a_dim=self.a_dim, memory_capacity=memory_capacity, batch_size=batch_size, reward_scale=reward_scale, 
-            temperature=temperature, soft_lr=soft_lr)    
+        self.agent = Agent(
+            s_dim=self.s_dim,
+            a_dim=self.a_dim,
+            memory_capacity=memory_capacity,
+            batch_size=batch_size,
+            reward_scale=reward_scale,
+            temperature=temperature,
+            soft_lr=soft_lr
+        )
     
     def initialization(self):
         event = np.empty(self.e_dim)
