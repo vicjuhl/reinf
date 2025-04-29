@@ -189,7 +189,7 @@ class System:
     def initialization(self):
         event = np.empty(self.e_dim)
         if self.hard_start:
-            obs = np.array([-np.pi,0.0,0.0])
+            obs = np.array([-np.pi,-np.pi,0.0])
             self.env.state = obs
         else:
             obs, info = self.env.reset()
