@@ -3,6 +3,8 @@ import torch
 import torch.optim as optim
 import gymnasium as gym                 #going to the gym
 from nets import Memory, v_valueNet, q_valueNet, policyNet
+from gymnasium.wrappers import RecordVideo, TimeLimit
+from config import VIDEOS_DIR
 
 from sys import stdout
 import pickle
@@ -152,14 +154,19 @@ class Agent:
 #-------------------------------------------------------------
 class System:
     def __init__(self, memory_capacity = 200000, env_steps=1, grad_steps=1, init_steps=256, reward_scale = 25,
-        temperature=1.0, soft_lr=5e-3, batch_size=256, hard_start = False, original_state=True, system='Hopper-v4'): # 'Pendulum-v0', 'Hopper-v2', 'HalfCheetah-v2', 'Swimmer-v2'
-        self.env = gym.make(system)
+        temperature=1.0, soft_lr=5e-3, batch_size=256, system='Hopper-v4',
+        epsd_steps=200, proc_id=-1): # 'Pendulum-v0', 'Hopper-v2', 'HalfCheetah-v2', 'Swimmer-v2'
+
+        env = gym.make(system, render_mode="rgb_array")
+        env = TimeLimit(env, max_episode_steps=epsd_steps)
+        if proc_id == 0:
+            print(f"Saving videos for simulation on processor {proc_id}...")
+            env = RecordVideo(env, video_folder=VIDEOS_DIR, episode_trigger=lambda e: e % 10 == 0)
+        self.env = env
         self.env.reset(seed=None)
         self.type = system
        
-        self.s_dim = self.env.observation_space.shape[0]               
-        if not original_state and system == 'Pendulum-v1':
-            self.s_dim -= 1
+        self.s_dim = self.env.observation_space.shape[0]
         self.a_dim = self.env.action_space.shape[0] 
         self.sa_dim = self.s_dim + self.a_dim
         self.e_dim = self.s_dim*2 + self.a_dim + 1
@@ -167,9 +174,8 @@ class System:
         self.env_steps = env_steps
         self.grad_steps = grad_steps
         self.init_steps = init_steps
+        self.epsd_steps = epsd_steps
         self.batch_size = batch_size
-        self.hard_start = hard_start
-        self.original_state = original_state
 
         self.min_action = self.env.action_space.low[0]
         self.max_action = self.env.action_space.high[0]
@@ -188,87 +194,51 @@ class System:
     
     def initialization(self):
         event = np.empty(self.e_dim)
-        if self.hard_start:
-            obs = np.array([-np.pi,-np.pi,0.0])
-            self.env.state = obs
-        else:
-            obs, info = self.env.reset()
-        if self.original_state:
-            state = obs
-        else:
-            state = self.env.state 
+        state, info = self.env.reset()
         
-        for init_step in range(0, self.init_steps):            
+        for _ in range(0, self.init_steps):            
             action = np.random.rand(self.a_dim)*2 - 1
-            obs, reward, terminated, truncated, _ = self.env.step(self.scale_action(action))
-            if self.original_state:
-                next_state = obs
-            else:
-                next_state = self.env.state
-                next_state[0] = normalize_angle(next_state[0])
+            next_state, reward, terminated, truncated, _ = self.env.step(self.scale_action(action))
 
             event[:self.s_dim] = state
             event[self.s_dim:self.sa_dim] = action
             event[self.sa_dim] = reward
-            event[self.sa_dim+1:self.e_dim] = next_state
+            event[self.sa_dim+1:self.e_dim] = next_state          
 
             self.agent.memorize(event)
             state = np.copy(next_state)
 
     def scale_action(self, a):
         return (0.5 * (a + 1.0) * (self.max_action - self.min_action) + self.min_action)
-
-    def process_state(self, state):
-        if self.original_state:
-            return state
-        else:
-            state[0] = normalize_angle(state[0])  # Normalize angle if needed
-            return state
     
-    def interaction(self, learn=True, remember=True):   
+    def interaction(self, state, learn=True, remember=True):   
         event = np.empty(self.e_dim)
-        if self.original_state:
-            obs, info = self.env.reset()
-            state = obs
-        else:            
-            state = self.env.state 
-            state[0] = normalize_angle(state[0])
 
-        for env_step in range(0, self.env_steps):
-            
+        for _ in range(0, self.env_steps):
             cuda_state = torch.FloatTensor(state).unsqueeze(0).to(device)         
             action = self.agent.act(cuda_state, explore=learn)
             scaled_action = self.scale_action(action.detach().cpu().numpy().flatten())
             obs, reward, terminated, truncated, _ = self.env.step(scaled_action)
             done = terminated or truncated
 
-            if done: #TODO
-                pass
-
-            if self.original_state:
-                next_state = obs
-            else:
-                next_state = self.env.state
-                next_state[0] = normalize_angle(next_state[0])
-
             event[:self.s_dim] = state
             event[self.s_dim:self.sa_dim] = action
             event[self.sa_dim] = reward
-            event[self.sa_dim+1:self.e_dim] = next_state
+            event[self.sa_dim+1:self.e_dim] = obs
 
             if remember:
-                self.agent.memorize(event)   
+                self.agent.memorize(event)
             
-            state = np.copy(next_state)
+            state = np.copy(obs)
         
         if learn:
             for grad_step in range(0, self.grad_steps):
                 self.agent.learn()
         
-        return(event)
+        return done, event, obs
     
-    def train_agent(self, tr_epsds, epsd_steps, initialization=True):
-        if initialization:
+    def train_agent(self, tr_epsds, initialization=True):
+        if initialization: # TODO
             self.initialization()
         
         min_reward = 1e10
@@ -284,38 +254,34 @@ class System:
             epsd_max_reward = -1e10                
             epsd_mean_reward = 0.0
 
-            if self.hard_start:
-                initial_state = np.array([-np.pi,0.0])
-                self.env.state = initial_state
-            else:
-                obs, info = self.env.reset()
+            obs, info = self.env.reset()
             
-            for epsd_step in range(0, epsd_steps):
+            while True:
                 if len(self.agent.memory.data) < self.batch_size:
-                    event = self.interaction(learn=False)
+                    done, event, obs = self.interaction(obs, learn=False)
                 else:
-                    event = self.interaction()
+                    done, event, obs = self.interaction(obs)
                 r = event[self.sa_dim]
 
                 min_reward = np.min([r, min_reward])
                 max_reward = np.max([r, max_reward])
                 epsd_min_reward = np.min([r, epsd_min_reward])                        
                 epsd_max_reward = np.max([r, epsd_max_reward])                        
-                epsd_mean_reward += r           
+                epsd_mean_reward += r  
+                if done:
+                    break
             
             # if epsd_mean_reward > max_mean_reward:
             #     pickle.dump(self,open(self.type+'.p','wb'))
             
-            epsd_mean_reward /= epsd_steps            
+            epsd_mean_reward /= self.epsd_steps
             mean_rewards.append(epsd_mean_reward)
 
             min_mean_reward = np.min([epsd_mean_reward, min_mean_reward])
-            max_mean_reward = np.max([epsd_mean_reward, max_mean_reward])            
-            mean_reward += (epsd_mean_reward - mean_reward)/(epsd+1)            
-            stdout.write("Finished epsd %i, epsd.min(r) = %.4f, epsd.max(r) = %.4f, min.(r) = %.4f, max.(r) = %.4f, min.(av.r) = %.4f, max.(av.r) = %.4f, epsd.av.r = %.4f, total av.r = %.4f\r " %
-                ((epsd+1), epsd_min_reward, epsd_max_reward, min_reward, max_reward, min_mean_reward, max_mean_reward, epsd_mean_reward, mean_reward))
-            stdout.flush()
-            time.sleep(0.0001)      
+            max_mean_reward = np.max([epsd_mean_reward, max_mean_reward])
+            mean_reward += (epsd_mean_reward - mean_reward)/(epsd+1)
+            print(f"Finished epsd {epsd+1}, epsd.min(r) = {epsd_min_reward:.4f}, epsd.max(r) = {epsd_max_reward:.4f}, min.(r) = {min_reward:.4f}, max.(r) = {max_reward:.4f}, min.(av.r) = {min_mean_reward:.4f}, max.(av.r) = {max_mean_reward:.4f}, epsd.av.r = {epsd_mean_reward:.4f}, total av.r = {mean_reward:.4f}\r")
+            time.sleep(0.0001)
         print("")     
         return mean_rewards
             
