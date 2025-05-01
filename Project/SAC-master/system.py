@@ -177,8 +177,8 @@ class System:
         self.epsd_steps = epsd_steps
         self.batch_size = batch_size
 
-        self.min_action = self.env.action_space.low[0]
-        self.max_action = self.env.action_space.high[0]
+        self.min_action = self.env.action_space.low
+        self.max_action = self.env.action_space.high
         self.temperature = temperature
         self.reward_scale = reward_scale
 
