@@ -18,7 +18,7 @@ EPISODE_LENGTH = {
     "Hopper-v4": 1000,
 }
 
-N_EPISODES = {
-    "Pendulum-v1": 25,
-    "Hopper-v4": 10,
+TOTAL_STEPS = {
+    "Pendulum-v1": 1e4,
+    "Hopper-v4": 2000#1e5,
 }

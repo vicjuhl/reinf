@@ -165,7 +165,8 @@ class System:
         env = TimeLimit(env, max_episode_steps=epsd_steps)
         if video_freq is not None and proc_id == 0:
             print(f"Saving videos for simulation for process id {proc_id}...")
-            env = RecordVideo(env, name_prefix=f"{system}_{alg}", video_folder=VIDEOS_DIR, step_trigger=lambda s: s % video_freq == 0)
+            env = RecordVideo(env, name_prefix=f"{system}_{alg}", video_folder=VIDEOS_DIR,
+                              step_trigger=lambda s: s % video_freq == 0)
         self.env = env
         self.env.reset(seed=None)
         self.type = system
