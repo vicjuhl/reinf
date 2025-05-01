@@ -4,9 +4,9 @@ from config import RESULTS_DIR, PLOTS_DIR
 import json
 import re
 
-def add_algorithm_results_to_plot(system_name, algorithm, epsd_steps):
+def add_algorithm_results_to_plot(system_name, alg, epsd_steps):
     # Load JSON results
-    with (RESULTS_DIR / f"mean_rewards_{system_name}_{epsd_steps}_5.json").open('r') as f:
+    with (RESULTS_DIR / f"mean_rewards_{system_name}_{alg}_{epsd_steps}_5.json").open('r') as f:
         rewards = json.load(f)
 
     # Convert to numpy array for easier calculations
@@ -21,7 +21,7 @@ def add_algorithm_results_to_plot(system_name, algorithm, epsd_steps):
     time_steps = np.arange(len(mean_values))
 
     # Add to the plot
-    plt.plot(time_steps * epsd_steps, mean_values, label=algorithm)
+    plt.plot(time_steps * epsd_steps, mean_values, label=alg)
     plt.fill_between(time_steps * epsd_steps, min_values, max_values, alpha=0.2)
 
 def plot_system(system_name, algs, epsd_steps):
@@ -39,4 +39,4 @@ def plot_system(system_name, algs, epsd_steps):
     plt.savefig(PLOTS_DIR / f'{system_name}_rewards_plot.png', dpi=300, bbox_inches='tight')
     plt.close()
 
-plot_system("Pendulum-v1", ["SAC"], 200)
+plot_system("Pendulum-v1", ["SAC", "SAC2"], 200)
