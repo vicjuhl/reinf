@@ -4,6 +4,8 @@ SCRIPT_DIR = pl.Path(__file__).parent.absolute()
 MODELS_DIR = SCRIPT_DIR / "models"
 RESULTS_DIR = SCRIPT_DIR / "results"
 VIDEOS_DIR = SCRIPT_DIR / "videos"
+PLOTS_DIR = SCRIPT_DIR / "plots"
+
 REWARD_SCALE = {
     "Pendulum-v1": 5,
     "Hopper-v4": 10,

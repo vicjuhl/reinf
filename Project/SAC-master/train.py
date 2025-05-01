@@ -3,18 +3,20 @@ import json
 import pickle
 from system import System  # wherever your System class lives
 from pathlib import Path
-from config import MODELS_DIR, RESULTS_DIR, VIDEOS_DIR, REWARD_SCALE
+from config import MODELS_DIR, RESULTS_DIR, VIDEOS_DIR, REWARD_SCALE, PLOTS_DIR
 
 # Create directories if they don't exist
 MODELS_DIR.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(exist_ok=True)
 VIDEOS_DIR.mkdir(exist_ok=True)
+PLOTS_DIR.mkdir(exist_ok=True)
 
 def run_env(proc_id, system_type, tr_epsds, epsd_steps, result_queue):
     system = System(
         system=system_type,
         reward_scale=REWARD_SCALE[system_type],
         epsd_steps=epsd_steps,
+        video_freq=(tr_epsds // (5)),
         proc_id=proc_id
     )
     rewards = system.train_agent(tr_epsds)
@@ -26,10 +28,10 @@ def run_env(proc_id, system_type, tr_epsds, epsd_steps, result_queue):
 if __name__ == "__main__":
     mp.set_start_method("spawn")
 
-    n_test = 1
+    n_test = 5
     system_type = 'Pendulum-v1'
-    tr_epsds = 15
-    epsd_steps = 20
+    tr_epsds = 100
+    epsd_steps = 200
     result_queue = mp.Queue()
     processes = []
 
@@ -53,6 +55,6 @@ if __name__ == "__main__":
     # Convert NumPy arrays inside to lists (if any)
     all_rewards_clean = [[float(r) for r in episode] for episode in all_rewards]
     # Save to JSON in results directory
-    results_path = RESULTS_DIR / f'mean_rewards_{system_type}_{n_test}.json'
+    results_path = RESULTS_DIR / f'mean_rewards_{system_type}_{epsd_steps}_{n_test}.json'
     with open(results_path, 'w') as f:
         json.dump(all_rewards_clean, f, indent=2)

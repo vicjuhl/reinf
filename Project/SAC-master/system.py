@@ -155,13 +155,13 @@ class Agent:
 class System:
     def __init__(self, memory_capacity = 200000, env_steps=1, grad_steps=1, init_steps=256, reward_scale = 25,
         temperature=1.0, soft_lr=5e-3, batch_size=256, system='Hopper-v4',
-        epsd_steps=200, proc_id=-1): # 'Pendulum-v0', 'Hopper-v2', 'HalfCheetah-v2', 'Swimmer-v2'
+        epsd_steps=200, video_freq=200, proc_id=-1): # 'Pendulum-v0', 'Hopper-v2', 'HalfCheetah-v2', 'Swimmer-v2'
 
         env = gym.make(system, render_mode="rgb_array")
         env = TimeLimit(env, max_episode_steps=epsd_steps)
         if proc_id == 0:
-            print(f"Saving videos for simulation on processor {proc_id}...")
-            env = RecordVideo(env, video_folder=VIDEOS_DIR, episode_trigger=lambda e: e % 10 == 0)
+            print(f"Saving videos for simulation for process id {proc_id}...")
+            env = RecordVideo(env, video_folder=VIDEOS_DIR, episode_trigger=lambda e: e % video_freq == 0)
         self.env = env
         self.env.reset(seed=None)
         self.type = system
