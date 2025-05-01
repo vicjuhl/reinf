@@ -12,3 +12,13 @@ REWARD_SCALE = {
     "HalfCheetah-v4": 3,
     "Swimmer-v4": 5
 }
+
+EPISODE_LENGTH = {
+    "Pendulum-v1": 200,
+    "Hopper-v4": 1000,
+}
+
+N_EPISODES = {
+    "Pendulum-v1": 25,
+    "Hopper-v4": 10,
+}

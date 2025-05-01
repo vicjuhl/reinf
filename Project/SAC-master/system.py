@@ -5,6 +5,7 @@ import gymnasium as gym                 #going to the gym
 from nets import Memory, v_valueNet, q_valueNet, policyNet
 from gymnasium.wrappers import RecordVideo, TimeLimit
 from config import VIDEOS_DIR
+from itertools import count
 
 from sys import stdout
 import pickle
@@ -94,7 +95,7 @@ class Agent:
 
     def act(self, state, explore=True):
         with torch.no_grad():
-            action = self.actor.sample_action(state)        
+            action = self.actor.sample_action(state)
             return action
     
     def memorize(self, event):
@@ -155,13 +156,16 @@ class Agent:
 class System:
     def __init__(self, alg, memory_capacity = 200000, env_steps=1, grad_steps=1, init_steps=256, reward_scale = 25,
         temperature=1.0, soft_lr=5e-3, batch_size=256, system='Hopper-v4',
-        epsd_steps=200, video_freq=200, proc_id=-1): # 'Pendulum-v0', 'Hopper-v2', 'HalfCheetah-v2', 'Swimmer-v2'
+        epsd_steps=200, video_freq=200, proc_id=-1): # 'Pendulum-v0', 'Hopper-v4', 'HalfCheetah-v2', 'Swimmer-v2'
 
-        env = gym.make(system, render_mode="rgb_array")
+        env = gym.make(
+            system,
+            render_mode="rgb_array" if video_freq is not None else None
+        )
         env = TimeLimit(env, max_episode_steps=epsd_steps)
-        if proc_id == 0:
+        if video_freq is not None and proc_id == 0:
             print(f"Saving videos for simulation for process id {proc_id}...")
-            env = RecordVideo(env, name_prefix={f"{system}_{alg}"}, video_folder=VIDEOS_DIR, episode_trigger=lambda e: e % video_freq == 0)
+            env = RecordVideo(env, name_prefix=f"{system}_{alg}", video_folder=VIDEOS_DIR, step_trigger=lambda s: s % video_freq == 0)
         self.env = env
         self.env.reset(seed=None)
         self.type = system
@@ -198,7 +202,7 @@ class System:
         
         for _ in range(0, self.init_steps):            
             action = np.random.rand(self.a_dim)*2 - 1
-            next_state, reward, terminated, truncated, _ = self.env.step(self.scale_action(action))
+            next_state, reward, _, _, _ = self.env.step(self.scale_action(action))
 
             event[:self.s_dim] = state
             event[self.s_dim:self.sa_dim] = action
@@ -237,7 +241,7 @@ class System:
         
         return done, event, obs
     
-    def train_agent(self, tr_epsds, initialization=True):
+    def train_agent(self, total_steps, initialization=True):
         if initialization: # TODO
             self.initialization()
         
@@ -247,16 +251,18 @@ class System:
         min_mean_reward = 1e10
         max_mean_reward = -1e10   
 
-        mean_rewards = []           
+        results = []
+        steps_performed = 0
+        epsd = 0
         
-        for epsd in range(0, tr_epsds):
+        while steps_performed < total_steps:
             epsd_min_reward = 1e10
             epsd_max_reward = -1e10                
-            epsd_mean_reward = 0.0
+            epsd_total_reward = 0.0
 
-            obs, info = self.env.reset()
+            obs, _ = self.env.reset()
             
-            while True:
+            for step in count():
                 if len(self.agent.memory.data) < self.batch_size:
                     done, event, obs = self.interaction(obs, learn=False)
                 else:
@@ -267,25 +273,24 @@ class System:
                 max_reward = np.max([r, max_reward])
                 epsd_min_reward = np.min([r, epsd_min_reward])                        
                 epsd_max_reward = np.max([r, epsd_max_reward])                        
-                epsd_mean_reward += r  
+                epsd_total_reward += r  
                 if done:
+                    print(f"Terminated after {step} steps")
+                    steps_performed += step + 1
                     break
             
             # if epsd_mean_reward > max_mean_reward:
             #     pickle.dump(self,open(self.type+'.p','wb'))
             
-            epsd_mean_reward /= self.epsd_steps
-            mean_rewards.append(epsd_mean_reward)
+            epsd_mean_reward = epsd_total_reward / step
+            results.append({"epsd_total_reward": epsd_total_reward, "final_step": step})
 
             min_mean_reward = np.min([epsd_mean_reward, min_mean_reward])
             max_mean_reward = np.max([epsd_mean_reward, max_mean_reward])
             mean_reward += (epsd_mean_reward - mean_reward)/(epsd+1)
-            print(f"Finished epsd {epsd+1}, epsd.min(r) = {epsd_min_reward:.4f}, epsd.max(r) = {epsd_max_reward:.4f}, min.(r) = {min_reward:.4f}, max.(r) = {max_reward:.4f}, min.(av.r) = {min_mean_reward:.4f}, max.(av.r) = {max_mean_reward:.4f}, epsd.av.r = {epsd_mean_reward:.4f}, total av.r = {mean_reward:.4f}\r")
+            # print(f"Finished epsd {epsd+1}, epsd.min(r) = {epsd_min_reward:.4f}, epsd.max(r) = {epsd_max_reward:.4f}, min.(r) = {min_reward:.4f}, max.(r) = {max_reward:.4f}, min.(av.r) = {min_mean_reward:.4f}, max.(av.r) = {max_mean_reward:.4f}, epsd.av.r = {epsd_mean_reward:.4f}, total av.r = {mean_reward:.4f}\r") TODO
+            print(f"Finished epsd {epsd+1}, step {steps_performed}, epsd_total_r: {epsd_total_reward:.4f}")
+            epsd += 1
             time.sleep(0.0001)
         print("")     
-        return mean_rewards
-            
-            
-
-            
-
+        return results
