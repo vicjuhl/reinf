@@ -224,6 +224,8 @@ class System:
             action = self.agent.act(cuda_state, explore=learn)
             scaled_action = self.scale_action(action.detach().cpu().numpy().flatten())
             obs, reward, terminated, truncated, _ = self.env.step(scaled_action)
+            if terminated:
+                reward = -10
             done = terminated or truncated
 
             event[:self.s_dim] = state
@@ -237,7 +239,7 @@ class System:
             state = np.copy(obs)
         
         if learn:
-            for grad_step in range(0, self.grad_steps):
+            for _ in range(0, self.grad_steps):
                 self.agent.learn()
         
         return done, event, obs
@@ -263,7 +265,7 @@ class System:
 
             obs, _ = self.env.reset()
             
-            for step in count():
+            for epsd_step in count():
                 if len(self.agent.memory.data) < self.batch_size:
                     done, event, obs = self.interaction(obs, learn=False)
                 else:
@@ -276,21 +278,20 @@ class System:
                 epsd_max_reward = np.max([r, epsd_max_reward])                        
                 epsd_total_reward += r  
                 if done:
-                    print(f"Terminated after {step} steps")
-                    steps_performed += step + 1
+                    steps_performed += epsd_step + 1
                     break
             
             # if epsd_mean_reward > max_mean_reward:
             #     pickle.dump(self,open(self.type+'.p','wb'))
             
-            epsd_mean_reward = epsd_total_reward / step
-            results.append({"epsd_total_reward": epsd_total_reward, "final_step": step})
+            epsd_mean_reward = epsd_total_reward / epsd_step
+            results.append({"epsd_total_reward": epsd_total_reward, "final_step": epsd_step})
 
             min_mean_reward = np.min([epsd_mean_reward, min_mean_reward])
             max_mean_reward = np.max([epsd_mean_reward, max_mean_reward])
             mean_reward += (epsd_mean_reward - mean_reward)/(epsd+1)
             # print(f"Finished epsd {epsd+1}, epsd.min(r) = {epsd_min_reward:.4f}, epsd.max(r) = {epsd_max_reward:.4f}, min.(r) = {min_reward:.4f}, max.(r) = {max_reward:.4f}, min.(av.r) = {min_mean_reward:.4f}, max.(av.r) = {max_mean_reward:.4f}, epsd.av.r = {epsd_mean_reward:.4f}, total av.r = {mean_reward:.4f}\r") TODO
-            print(f"Finished epsd {epsd+1}, step {steps_performed}, epsd_total_r: {epsd_total_reward:.4f}")
+            print(f"Finished epsd {epsd+1} in\t{epsd_step} steps.\tTotal steps {steps_performed},\tepsd_total_r: {epsd_total_reward:.4f}")
             epsd += 1
             time.sleep(0.0001)
         print("")     
