@@ -8,7 +8,7 @@ PLOTS_DIR = SCRIPT_DIR / "plots"
 
 REWARD_SCALE = {
     "Pendulum-v1": 5,
-    "Hopper-v4": 10,
+    "Hopper-v4": 100,
     "HalfCheetah-v4": 3,
     "Swimmer-v4": 5
 }
@@ -19,6 +19,6 @@ EPISODE_LENGTH = {
 }
 
 TOTAL_STEPS = {
-    "Pendulum-v1": 1e4,
-    "Hopper-v4": 2000#1e5,
+    "Pendulum-v1": int(2e4),
+    "Hopper-v4": int(1e6),
 }
