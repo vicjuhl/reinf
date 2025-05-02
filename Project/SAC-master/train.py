@@ -73,7 +73,7 @@ if __name__ == "__main__":
         all_results[proc_id] = results
 
     # Save to JSON in results directory
-    results_path = RESULTS_DIR / f'results_{system_type}_{alg}_{int(total_steps)}_{n_test}.json'
+    results_path = RESULTS_DIR / f'results_{system_type}_{alg}_{int(total_steps)}_{n_test}_{reward_scale}_{punishment}.json'
     with open(results_path, 'w') as f:
         json.dump(all_results, f, indent=2)
         print("Written results to json (safe to interrupt if needed)")
