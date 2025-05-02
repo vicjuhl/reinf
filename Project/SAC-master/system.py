@@ -154,9 +154,22 @@ class Agent:
 #
 #-------------------------------------------------------------
 class System:
-    def __init__(self, alg, memory_capacity = 200000, env_steps=1, grad_steps=1, init_steps=256, reward_scale = 25,
-        temperature=1.0, soft_lr=5e-3, batch_size=256, system='Hopper-v4',
-        epsd_steps=200, video_freq=200, proc_id=-1): # 'Pendulum-v0', 'Hopper-v4', 'HalfCheetah-v2', 'Swimmer-v2'
+    def __init__(
+        self,
+        alg,
+        memory_capacity = 200000,
+        env_steps=1,
+        grad_steps=1,
+        init_steps=256,
+        reward_scale = 25,
+        punishment=-10,
+        temperature=1.0,
+        soft_lr=5e-3,
+        batch_size=256,
+        system='Hopper-v4',
+        epsd_steps=200,
+        video_freq=200,
+        proc_id=-1): # 'Pendulum-v0', 'Hopper-v4', 'HalfCheetah-v2', 'Swimmer-v2'
 
         env = gym.make(
             system,
@@ -186,6 +199,7 @@ class System:
         self.max_action = self.env.action_space.high
         self.temperature = temperature
         self.reward_scale = reward_scale
+        self.punishment = punishment
 
         self.agent = Agent(
             s_dim=self.s_dim,
@@ -225,7 +239,7 @@ class System:
             scaled_action = self.scale_action(action.detach().cpu().numpy().flatten())
             obs, reward, terminated, truncated, _ = self.env.step(scaled_action)
             if terminated:
-                reward = -10
+                reward = self.punishment
             done = terminated or truncated
 
             event[:self.s_dim] = state

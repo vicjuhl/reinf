@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import json
 import pickle
+import argparse
 from system import System  # wherever your System class lives
 from pathlib import Path
 from config import MODELS_DIR, RESULTS_DIR, VIDEOS_DIR, REWARD_SCALE, PLOTS_DIR, EPISODE_LENGTH, TOTAL_STEPS
@@ -11,14 +12,29 @@ RESULTS_DIR.mkdir(exist_ok=True)
 VIDEOS_DIR.mkdir(exist_ok=True)
 PLOTS_DIR.mkdir(exist_ok=True)
 
-def run_env(proc_id, alg, system_type, total_steps, epsd_steps, result_queue):
+def parse_args():
+    parser = argparse.ArgumentParser(description='Train SAC agent on different environments')
+    parser.add_argument('--n_test', type=int, default=5, help='Number of parallel training runs')
+    parser.add_argument('--alg', type=str, choices=['SAC', 'SACGAE'], help='Algorithm to use')
+    parser.add_argument('--system_type', type=str,
+                       choices=['Hopper-v4', 'Pendulum-v1'], help='Environment to train on')
+    parser.add_argument('--total_steps', type=int, default=None, 
+                       help='Total number of training steps. If None, uses default from config')
+    parser.add_argument('--reward_scale', type=float, default=None,
+                       help='Reward scaling factor. If None, uses default from config')
+    parser.add_argument('--punishment', type=float, default=-10,
+                       help='Punishment value for termination. Default is -10')
+    return parser.parse_args()
+
+def run_env(proc_id, alg, system_type, reward_scale, punishment, total_steps, epsd_steps, result_queue):
     system = System(
         system=system_type,
         alg=alg,
-        reward_scale=REWARD_SCALE[system_type],
+        reward_scale=reward_scale,
+        punishment=punishment,
         epsd_steps=epsd_steps,
         video_freq=None,#total_steps // 5, # TODO: will this begin videos in the middle of episodes?
-        proc_id=proc_id
+        proc_id=proc_id,
     )
     results = system.train_agent(total_steps)
     # Save model to models directory
@@ -31,19 +47,21 @@ def run_env(proc_id, alg, system_type, total_steps, epsd_steps, result_queue):
 if __name__ == "__main__":
     mp.set_start_method("spawn")
 
-    n_test = 5
-    alg = 'SAC'
-    # system_type = 'Pendulum-v1'
-    system_type = 'Hopper-v4'
+    args = parse_args()
+    n_test = args.n_test
+    alg = args.alg
+    system_type = args.system_type
+    reward_scale = args.reward_scale if args.reward_scale is not None else REWARD_SCALE[system_type]
     epsd_steps = EPISODE_LENGTH[system_type]
-    total_steps = TOTAL_STEPS[system_type]
+    total_steps = args.total_steps if args.total_steps is not None else TOTAL_STEPS[system_type]
+    punishment = args.punishment
     result_queue = mp.Queue()
     processes = []
 
     for proc_id in range(n_test):
         p = mp.Process(
             target=run_env,
-            args=(proc_id, alg, system_type, total_steps, epsd_steps, result_queue)
+            args=(proc_id, alg, system_type, reward_scale, punishment, total_steps, epsd_steps, result_queue)
         )
         p.start()
         processes.append(p)
