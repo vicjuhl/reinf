@@ -305,7 +305,7 @@ class System:
             max_mean_reward = np.max([epsd_mean_reward, max_mean_reward])
             mean_reward += (epsd_mean_reward - mean_reward)/(epsd+1)
             # print(f"Finished epsd {epsd+1}, epsd.min(r) = {epsd_min_reward:.4f}, epsd.max(r) = {epsd_max_reward:.4f}, min.(r) = {min_reward:.4f}, max.(r) = {max_reward:.4f}, min.(av.r) = {min_mean_reward:.4f}, max.(av.r) = {max_mean_reward:.4f}, epsd.av.r = {epsd_mean_reward:.4f}, total av.r = {mean_reward:.4f}\r") TODO
-            print(f"Finished epsd {epsd+1} in\t{epsd_step} steps.\tTotal steps {steps_performed},\tepsd_total_r: {epsd_total_reward:.4f}")
+            print(f"Finished epsd {epsd+1} in\t{epsd_step+1} steps.\tTotal steps {steps_performed},\tepsd_total_r: {epsd_total_reward:.4f}")
             epsd += 1
             time.sleep(0.0001)
         print("")     

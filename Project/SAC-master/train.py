@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument('--n_test', type=int, default=5, help='Number of parallel training runs')
     parser.add_argument('--alg', type=str, choices=['SAC', 'SACGAE'], help='Algorithm to use')
     parser.add_argument('--system_type', type=str,
-                       choices=['Hopper-v4', 'Pendulum-v1'], help='Environment to train on')
+                       choices=['Hopper-v4', 'Pendulum-v1', 'HalfCheetah-v3', 'Ant-v4'], help='Environment to train on')
     parser.add_argument('--total_steps', type=int, default=None, 
                        help='Total number of training steps. If None, uses default from config')
     parser.add_argument('--reward_scale', type=float, default=None,
