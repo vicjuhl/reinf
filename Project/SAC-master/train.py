@@ -57,6 +57,6 @@ if __name__ == "__main__":
 
 
     # Save to JSON in results directory
-    results_path = RESULTS_DIR / f'results_{system_type}_{alg}_{epsd_steps}_{n_test}.json'
+    results_path = RESULTS_DIR / f'results_{system_type}_{alg}_{total_steps}_{n_test}.json'
     with open(results_path, 'w') as f:
         json.dump(all_results, f, indent=2)

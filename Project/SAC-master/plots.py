@@ -4,9 +4,9 @@ from config import RESULTS_DIR, PLOTS_DIR
 import json
 import re
 
-def add_algorithm_results_to_plot(system_name, alg, epsd_steps):
+def add_algorithm_results_to_plot(system_name, alg, total_steps):
     # Load JSON results
-    with (RESULTS_DIR / f"results_{system_name}_{alg}_{epsd_steps}_5.json").open('r') as f:
+    with (RESULTS_DIR / f"results_{system_name}_{alg}_{total_steps}_5.json").open('r') as f:
         results = json.load(f)
 
     n_proc = len(results)
@@ -33,14 +33,14 @@ def add_algorithm_results_to_plot(system_name, alg, epsd_steps):
         plt.plot(acc_steps, r, label=alg)
         # plt.fill_between(time_steps * epsd_steps, min_values, max_values, alpha=0.2)
 
-def plot_system(system_name, algs, epsd_steps):
+def plot_system(system_name, algs, total_steps):
     plt.figure(figsize=(10, 6))
     for alg in algs:
-        add_algorithm_results_to_plot(system_name, alg, epsd_steps)
+        add_algorithm_results_to_plot(system_name, alg, total_steps)
 
     # Add plot labels and title
     plt.xlabel('Time steps')
-    plt.ylabel('Episode average reward')
+    plt.ylabel('Episode total reward')
     plt.title(system_name)
     plt.legend()
 
