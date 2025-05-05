@@ -3,10 +3,20 @@ import matplotlib.pyplot as plt
 from config import RESULTS_DIR, PLOTS_DIR
 import json
 import re
+from pathlib import Path
+import glob
+
+def find_results_file(system_name, alg, total_steps):
+    pattern = f"results_{system_name}_{alg}_{total_steps}*.json"
+    matching_files = list(RESULTS_DIR.glob(pattern))
+    if not matching_files:
+        raise FileNotFoundError(f"No matching results file found for pattern: {pattern}")
+    return matching_files[0]
 
 def add_alg_results_to_plot(system_name, alg, total_steps):
     # Load JSON results
-    with (RESULTS_DIR / f"results_{system_name}_{alg}_{total_steps}_5.json").open('r') as f:
+    results_file = find_results_file(system_name, alg, total_steps)
+    with results_file.open('r') as f:
         results = json.load(f)
 
     n_proc = len(results)
@@ -28,12 +38,13 @@ def add_alg_results_to_plot(system_name, alg, total_steps):
         r = total_rewards[proc_id]
         es = epsd_steps_actual[proc_id]
         acc_steps = np.cumsum(es)
-        plt.plot(acc_steps, r, label=alg)
+        plt.plot(acc_steps, r, linewidth=0.5, alpha=0.5)
         # plt.fill_between(time_steps * epsd_steps, min_values, max_values, alpha=0.2)
 
 def add_epsd_len_to_plot(system_name, alg, total_steps):
     # Load JSON results
-    with (RESULTS_DIR / f"results_{system_name}_{alg}_{total_steps}_5.json").open('r') as f:
+    results_file = find_results_file(system_name, alg, total_steps)
+    with results_file.open('r') as f:
         results = json.load(f)
 
     n_proc = len(results)
@@ -77,4 +88,6 @@ def plot_system(system_name, algs, total_steps):
     plt.close()
 
 # plot_system("Pendulum-v1", ["SAC", "SAC2"], 200)
-plot_system("Hopper-v4", ["SAC"], int(1e4))
+plot_system("Hopper-v4", ["SAC"], int(1e6))
+plot_system("HalfCheetah-v4", ["SAC"], int(1e6))
+plot_system("Ant-v4", ["SAC"], int(1e6))

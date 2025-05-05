@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument('--n_test', type=int, default=5, help='Number of parallel training runs')
     parser.add_argument('--alg', type=str, choices=['SAC', 'SACGAE'], help='Algorithm to use')
     parser.add_argument('--system_type', type=str,
-                       choices=['Hopper-v4', 'Pendulum-v1', 'HalfCheetah-v3', 'Ant-v4'], help='Environment to train on')
+                       choices=['Hopper-v4', 'Pendulum-v1', 'HalfCheetah-v4', 'Ant-v4'], help='Environment to train on')
     parser.add_argument('--total_steps', type=int, default=None, 
                        help='Total number of training steps. If None, uses default from config')
     parser.add_argument('--reward_scale', type=float, default=None,
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         all_results[proc_id] = results
 
     # Save to JSON in results directory
-    results_path = RESULTS_DIR / f'results_{system_type}_{alg}_{int(total_steps)}_{n_test}_{reward_scale}_{punishment}.json'
+    results_path = RESULTS_DIR / f'results_{system_type}_{alg}_{int(total_steps)}_{n_test}_{int(reward_scale)}_{int(punishment)}.json'
     with open(results_path, 'w') as f:
         json.dump(all_results, f, indent=2)
         print("Written results to json (safe to interrupt if needed)")
