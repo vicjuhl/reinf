@@ -40,8 +40,9 @@ class Memory:
         capacity -- positive int number
         '''
         self.capacity = capacity
-        self.data = []        
+        self.data = []      
         self.pointer = 0
+        self.epsisode_length = 0
 
     
     def store(self, event):
@@ -57,7 +58,16 @@ class Memory:
             self.data.append(None)
         self.data[self.pointer] = event
         self.pointer = (self.pointer + 1) % self.capacity
+        self.epsisode_length += 1
 
+    def grab(self):
+        '''
+        Description:
+        Returns the list of observations for the entire episode
+        '''
+        episode = self.data[self.pointer - self.epsisode_length : self.pointer]
+        self.epsisode_length = 0                                                    #Reset episode memory
+        return episode
     
     def sample(self, batch_size):
         '''
@@ -254,6 +264,13 @@ class policyNet(nn.Module):
         u = m + log_stdev.exp()*torch.randn_like(m)
         a = torch.tanh(u).cpu()        
         return a
+    
+    def sample_action_and_logstd(self, s):
+        m, log_stdev = self(s)
+        stdev = log_stdev.exp()
+        u = m + stdev*torch.randn_like(m)
+        a = torch.tanh(u).cpu()
+        return a, log_stdev
 
     def sample_action_and_llhood(self, s):
         m, log_stdev = self(s)

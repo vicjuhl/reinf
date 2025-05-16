@@ -24,9 +24,10 @@ def parse_args():
                        help='Reward scaling factor. If None, uses default from config')
     parser.add_argument('--punishment', type=float, default=-10,
                        help='Punishment value for termination. Default is -10')
+    parser.add_argument('--GAE', action='store_true', help='Enable GAE')
     return parser.parse_args()
 
-def run_env(proc_id, alg, system_type, reward_scale, punishment, total_steps, epsd_steps, result_queue):
+def run_env(proc_id, alg, system_type, reward_scale, punishment, total_steps, epsd_steps, result_queue, GAE):
     system = System(
         system=system_type,
         alg=alg,
@@ -35,6 +36,7 @@ def run_env(proc_id, alg, system_type, reward_scale, punishment, total_steps, ep
         epsd_steps=epsd_steps,
         video_freq=None,#total_steps // 5, # TODO: will this begin videos in the middle of episodes?
         proc_id=proc_id,
+        GAE = GAE,
     )
     results = system.train_agent(total_steps)
     # Save model to models directory
@@ -57,11 +59,12 @@ if __name__ == "__main__":
     punishment = args.punishment
     result_queue = mp.Queue()
     processes = []
+    GAE = args.GAE
 
     for proc_id in range(n_test):
         p = mp.Process(
             target=run_env,
-            args=(proc_id, alg, system_type, reward_scale, punishment, total_steps, epsd_steps, result_queue)
+            args=(proc_id, alg, system_type, reward_scale, punishment, total_steps, epsd_steps, result_queue, GAE)
         )
         p.start()
         processes.append(p)

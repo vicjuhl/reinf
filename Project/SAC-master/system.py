@@ -66,7 +66,7 @@ class Agent:
     '''
 
     def __init__(self, s_dim=2, a_dim=1, memory_capacity=50000, batch_size=64, discount_factor=0.99, temperature=1.0,
-        soft_lr=5e-3, reward_scale=1.0):
+        soft_lr=5e-3, reward_scale=1.0, lambda_h=1, GAE=False):
         '''
         Initializes the agent.
 
@@ -77,19 +77,26 @@ class Agent:
         '''
         self.s_dim = s_dim
         self.a_dim = a_dim
-        self.sa_dim = self.s_dim + self.a_dim          
+        self.sa_dim = self.s_dim + self.a_dim
+        self.sas_dim = self.sa_dim + self.s_dim    
         self.batch_size = batch_size 
         self.gamma = discount_factor
+        self.lambda_h = lambda_h
         self.soft_lr = soft_lr        
         self.alpha = temperature
         self.reward_scale = reward_scale
+        self.GAE = GAE
+
          
         self.memory = Memory(memory_capacity)
+        self.memory_e = Memory(memory_capacity)                             #Set to max episode length
         self.actor = policyNet(s_dim, a_dim).to(device)        
         self.critic1 = q_valueNet(self.s_dim, self.a_dim).to(device)
         self.critic2 = q_valueNet(self.s_dim, self.a_dim).to(device)
         self.baseline = v_valueNet(s_dim).to(device) 
         self.baseline_target = v_valueNet(s_dim).to(device) 
+
+        self.gamlam_v = np.flip(np.array([(self.gamma*self.lambda_h)**i for i in range(memory_capacity)])) # TODO should be fixed for class
     
         updateNet(self.baseline_target, self.baseline, 1.0) 
 
@@ -98,9 +105,44 @@ class Agent:
             action = self.actor.sample_action(state)
             return action
     
-    def memorize(self, event):
+    def memorize_e(self, event):
+        self.memory_e.store(event[np.newaxis,:])
+
+    def memorize(self,event):
         self.memory.store(event[np.newaxis,:])
-    
+
+    def advantage(self):
+        episode = self.memory_e.grab()
+        episode = np.concatenate(episode,axis=0)
+        s = torch.FloatTensor(episode[:,:self.s_dim]).to(device)
+        a = torch.FloatTensor(episode[:,self.s_dim:self.sa_dim]).to(device)
+        r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
+        ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
+
+        na, log_stds = self.actor.sample_action_and_logstd(ns)
+        H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi])), dim=1,keepdim=True)
+
+        q1 = self.critic1(ns, na)
+        q2 = self.critic2(ns, na)
+
+        V = self.baseline(s)
+
+        delta_hat = r + self.gamma*torch.min(q1,q2) + H - V
+        delta_hat = delta_hat.detach().numpy()
+
+        A = np.zeros(len(episode))
+        for i in range(len(episode)):
+            A[:i+1] += self.gamlam_v[-i-1:] * delta_hat[i][0]
+
+        De = np.concatenate([episode,A.reshape(-1,1)],axis=1)
+
+        return De
+
+    def merge(self, De):
+        for event in De:
+            self.memorize(event)
+
+
     def learn(self):        
         batch = self.memory.sample(self.batch_size)
         batch = np.concatenate(batch, axis=0)
@@ -169,7 +211,8 @@ class System:
         system='Hopper-v4',
         epsd_steps=200,
         video_freq=200,
-        proc_id=-1): # 'Pendulum-v0', 'Hopper-v4', 'HalfCheetah-v2', 'Swimmer-v2'
+        proc_id=-1, # 'Pendulum-v0', 'Hopper-v4', 'HalfCheetah-v2', 'Swimmer-v2'
+        GAE = False):  # Enable GAE
 
         env = gym.make(
             system,
@@ -183,11 +226,13 @@ class System:
         self.env = env
         self.env.reset(seed=None)
         self.type = system
+        self.GAE = GAE
        
         self.s_dim = self.env.observation_space.shape[0]
         self.a_dim = self.env.action_space.shape[0] 
         self.sa_dim = self.s_dim + self.a_dim
-        self.e_dim = self.s_dim*2 + self.a_dim + 1
+        self.sas_dim = self.sa_dim + self.s_dim
+        self.e_dim = self.sas_dim + 1
 
         self.env_steps = env_steps
         self.grad_steps = grad_steps
@@ -200,6 +245,7 @@ class System:
         self.temperature = temperature
         self.reward_scale = reward_scale
         self.punishment = punishment
+        
 
         self.agent = Agent(
             s_dim=self.s_dim,
@@ -208,7 +254,8 @@ class System:
             batch_size=batch_size,
             reward_scale=reward_scale,
             temperature=temperature,
-            soft_lr=soft_lr
+            soft_lr=soft_lr,
+            GAE=GAE
         )
     
     def initialization(self):
@@ -222,10 +269,17 @@ class System:
             event[:self.s_dim] = state
             event[self.s_dim:self.sa_dim] = action
             event[self.sa_dim] = reward
-            event[self.sa_dim+1:self.e_dim] = next_state          
+            event[self.sa_dim+1:self.sas_dim+1] = next_state          
 
-            self.agent.memorize(event)
+            if self.GAE:
+                self.agent.memorize_e(event)
+            else:
+                self.agent.memorize(event)
+            
             state = np.copy(next_state)
+        
+        De = self.agent.advantage()
+        self.agent.merge(De)
 
     def scale_action(self, a):
         return (0.5 * (a + 1.0) * (self.max_action - self.min_action) + self.min_action)
@@ -240,18 +294,28 @@ class System:
             obs, reward, terminated, truncated, _ = self.env.step(scaled_action)
             if terminated:
                 reward = self.punishment
-            done = terminated or truncated
+            done = terminated or truncated              #Does this do anything?
 
             event[:self.s_dim] = state
             event[self.s_dim:self.sa_dim] = action
             event[self.sa_dim] = reward
-            event[self.sa_dim+1:self.e_dim] = obs
+            event[self.sa_dim+1:self.sas_dim+1] = obs
 
             if remember:
-                self.agent.memorize(event)
+                if self.GAE:
+                    self.agent.memorize_e(event)
+                else:
+                    self.agent.memorize(event)
+            
             
             state = np.copy(obs)
         
+        #Calculate advantage and merge into regular D (memory)
+        if self.GAE:
+            De = self.agent.advantage()
+            self.agent.merge(De)
+
+
         if learn:
             for _ in range(0, self.grad_steps):
                 self.agent.learn()
