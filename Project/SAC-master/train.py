@@ -25,6 +25,8 @@ def parse_args():
     parser.add_argument('--punishment', type=float, default=-10,
                        help='Punishment value for termination. Default is -10')
     parser.add_argument('--GAE', action='store_true', help='Enable GAE')
+    parser.add_argument('--grad_steps', type=int, default=1, help='Gradient steps')
+
     return parser.parse_args()
 
 def run_env(proc_id, alg, system_type, reward_scale, punishment, total_steps, epsd_steps, result_queue, GAE):

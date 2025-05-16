@@ -89,7 +89,7 @@ class Agent:
 
          
         self.memory = Memory(memory_capacity)
-        self.memory_e = Memory(memory_capacity)                             #Set to max episode length
+        self.memory_e = Memory(memory_capacity)
         self.actor = policyNet(s_dim, a_dim).to(device)        
         self.critic1 = q_valueNet(self.s_dim, self.a_dim).to(device)
         self.critic2 = q_valueNet(self.s_dim, self.a_dim).to(device)
@@ -104,7 +104,7 @@ class Agent:
         with torch.no_grad():
             action = self.actor.sample_action(state)
             return action
-    
+
     def memorize_e(self, event):
         self.memory_e.store(event[np.newaxis,:])
 
@@ -286,14 +286,20 @@ class System:
     
     def interaction(self, state, learn=True, remember=True):   
         event = np.empty(self.e_dim)
+        if self.GAE:
+            it = self.epsd_steps
+        else:
+            it = self.env_steps
 
-        for _ in range(0, self.env_steps):
+        r_interact = 0
+        for i in range(0, it):
             cuda_state = torch.FloatTensor(state).unsqueeze(0).to(device)         
             action = self.agent.act(cuda_state, explore=learn)
             scaled_action = self.scale_action(action.detach().cpu().numpy().flatten())
             obs, reward, terminated, truncated, _ = self.env.step(scaled_action)
             if terminated:
                 reward = self.punishment
+            r_interact += reward
             done = terminated or truncated              #Does this do anything?
 
             event[:self.s_dim] = state
@@ -307,20 +313,21 @@ class System:
                 else:
                     self.agent.memorize(event)
             
-            
             state = np.copy(obs)
-        
+
+            if done:
+                break
+            
         #Calculate advantage and merge into regular D (memory)
         if self.GAE:
             De = self.agent.advantage()
             self.agent.merge(De)
 
-
         if learn:
             for _ in range(0, self.grad_steps):
                 self.agent.learn()
         
-        return done, event, obs
+        return done, obs, r_interact, i+1
     
     def train_agent(self, total_steps, initialization=True):
         if initialization: # TODO
@@ -343,12 +350,13 @@ class System:
 
             obs, _ = self.env.reset()
             
-            for epsd_step in count():
+            epsd_step = 0
+            for int_step in count():
                 if len(self.agent.memory.data) < self.batch_size:
-                    done, event, obs = self.interaction(obs, learn=False)
+                    done, obs, r, steps = self.interaction(obs, learn=False)
                 else:
-                    done, event, obs = self.interaction(obs)
-                r = event[self.sa_dim]
+                    done, obs, r, steps = self.interaction(obs)
+                epsd_step += steps
 
                 min_reward = np.min([r, min_reward])
                 max_reward = np.max([r, max_reward])
@@ -356,7 +364,7 @@ class System:
                 epsd_max_reward = np.max([r, epsd_max_reward])                        
                 epsd_total_reward += r  
                 if done:
-                    steps_performed += epsd_step + 1
+                    steps_performed += epsd_step
                     break
             
             # if epsd_mean_reward > max_mean_reward:

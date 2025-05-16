@@ -42,7 +42,6 @@ class Memory:
         self.capacity = capacity
         self.data = []      
         self.pointer = 0
-        self.epsisode_length = 0
 
     
     def store(self, event):
@@ -55,20 +54,24 @@ class Memory:
         event -- tuple to be stored
         '''
         if len(self.data) < self.capacity:
-            self.data.append(None)
-        self.data[self.pointer] = event
+            self.data.append(event)
+        else:
+            self.data[self.pointer] = event
         self.pointer = (self.pointer + 1) % self.capacity
-        self.epsisode_length += 1
 
     def grab(self):
         '''
         Description:
         Returns the list of observations for the entire episode
         '''
-        episode = self.data[self.pointer - self.epsisode_length : self.pointer]
-        self.epsisode_length = 0                                                    #Reset episode memory
-        return episode
+        output = self.data
+        self.clean()
+        return output
     
+    def clean(self):
+        self.data = []
+        self.pointer = 0
+
     def sample(self, batch_size):
         '''
         Description:
