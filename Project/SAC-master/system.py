@@ -65,8 +65,8 @@ class Agent:
     learn --
     '''
 
-    def __init__(self, s_dim=2, a_dim=1, memory_capacity=50000, batch_size=64, discount_factor=0.99, temperature=1.0,
-        soft_lr=5e-3, reward_scale=1.0, lambda_h=1, GAE=False):
+    def __init__(self, s_dim=2, a_dim=1, memory_capacity=50000, memory_e_capacity = 50000, batch_size=64, discount_factor=0.99, temperature=1.0,
+        soft_lr=5e-3, reward_scale=1.0, lambda_h=1, GAE=False, IS=False):
         '''
         Initializes the agent.
 
@@ -78,7 +78,8 @@ class Agent:
         self.s_dim = s_dim
         self.a_dim = a_dim
         self.sa_dim = self.s_dim + self.a_dim
-        self.sas_dim = self.sa_dim + self.s_dim    
+        self.sas_dim = self.sa_dim + self.s_dim  
+        self.p_dim = self.sas_dim + IS
         self.batch_size = batch_size 
         self.gamma = discount_factor
         self.lambda_h = lambda_h
@@ -86,18 +87,22 @@ class Agent:
         self.alpha = temperature
         self.reward_scale = reward_scale
         self.GAE = GAE
+        self.IS = IS
 
          
         self.memory = Memory(memory_capacity)
-        self.memory_e = Memory(memory_capacity)
+        self.memory_e = Memory(memory_e_capacity)
         self.actor = policyNet(s_dim, a_dim).to(device)        
         self.critic1 = q_valueNet(self.s_dim, self.a_dim).to(device)
         self.critic2 = q_valueNet(self.s_dim, self.a_dim).to(device)
         self.baseline = v_valueNet(s_dim).to(device) 
         self.baseline_target = v_valueNet(s_dim).to(device) 
 
-        self.gamlam_v = np.flip(np.array([(self.gamma*self.lambda_h)**i for i in range(memory_capacity)])) # TODO should be fixed for class
-    
+        self.gamlam_v = np.flip(np.array([(self.gamma*self.lambda_h)**i for i in range(memory_e_capacity)])) # TODO should be fixed for class
+
+        #Weights for IS (not the most efficient way but whatever)
+        self.w = torch.ones(batch_size)
+
         updateNet(self.baseline_target, self.baseline, 1.0) 
 
     def act(self, state, explore=True):
@@ -113,6 +118,7 @@ class Agent:
 
     def advantage(self):
         episode = self.memory_e.grab()
+        self.memory_e.clean()
         episode = np.concatenate(episode,axis=0)
         s = torch.FloatTensor(episode[:,:self.s_dim]).to(device)
         a = torch.FloatTensor(episode[:,self.s_dim:self.sa_dim]).to(device)
@@ -127,8 +133,12 @@ class Agent:
 
         V = self.baseline(s)
 
+
         delta_hat = r + self.gamma*torch.min(q1,q2) + H - V
         delta_hat = delta_hat.detach().numpy()
+
+        ## SUPPOSED TO BE IN LOSS. NOT IN ADVANTAGE
+        
 
         A = np.zeros(len(episode))
         for i in range(len(episode)):
@@ -152,18 +162,24 @@ class Agent:
         r_batch = torch.FloatTensor(batch[:,self.sa_dim]).unsqueeze(1).to(device)
         ns_batch = torch.FloatTensor(batch[:,self.sa_dim+1:self.sa_dim+1+self.s_dim]).to(device)
 
+        if self.IS:
+            p_old = torch.FloatTensor(batch[:,self.p_dim])
+            p_new = torch.FloatTensor([self.actor.get_prob(si,ai) for si,ai in zip(s_batch,a_batch)])
+            self.w = p_new/p_old
+
+
         # Optimize q networks
         q1 = self.critic1(s_batch, a_batch)
         q2 = self.critic2(s_batch, a_batch)     
         next_v = self.baseline_target(ns_batch)
         q_approx = self.reward_scale * r_batch + self.gamma * next_v
 
-        q1_loss = self.critic1.loss_func(q1, q_approx.detach())
+        q1_loss = self.critic1.get_loss(q1, q_approx.detach(),self.w)
         self.critic1.optimizer.zero_grad()
         q1_loss.backward()
         self.critic1.optimizer.step()
         
-        q2_loss = self.critic2.loss_func(q2, q_approx.detach())
+        q2_loss = self.critic2.get_loss(q2, q_approx.detach(),self.w)
         self.critic2.optimizer.zero_grad()
         q2_loss.backward()
         self.critic2.optimizer.step()
@@ -176,13 +192,13 @@ class Agent:
         q_off = torch.min(q1_off, q2_off)          
         v_approx = q_off - self.alpha*llhood
 
-        v_loss = self.baseline.loss_func(v, v_approx.detach())
+        v_loss = self.baseline.get_loss(v, v_approx.detach(),self.w)
         self.baseline.optimizer.zero_grad()
         v_loss.backward()
         self.baseline.optimizer.step()
         
         # Optimize policy network
-        pi_loss = (llhood - q_off).mean()
+        pi_loss = self.actor.get_loss(llhood, q_off, self.w)
         self.actor.optimizer.zero_grad()
         pi_loss.backward()
         self.actor.optimizer.step()
@@ -212,7 +228,8 @@ class System:
         epsd_steps=200,
         video_freq=200,
         proc_id=-1, # 'Pendulum-v0', 'Hopper-v4', 'HalfCheetah-v2', 'Swimmer-v2'
-        GAE = False):  # Enable GAE
+        GAE = False,  # Enable GAE
+        IS = False):
 
         env = gym.make(
             system,
@@ -227,12 +244,14 @@ class System:
         self.env.reset(seed=None)
         self.type = system
         self.GAE = GAE
+        self.IS = IS
        
         self.s_dim = self.env.observation_space.shape[0]
         self.a_dim = self.env.action_space.shape[0] 
         self.sa_dim = self.s_dim + self.a_dim
         self.sas_dim = self.sa_dim + self.s_dim
-        self.e_dim = self.sas_dim + 1
+        self.p_dim = self.sas_dim + self.IS
+        self.e_dim = self.p_dim + 1
 
         self.env_steps = env_steps
         self.grad_steps = grad_steps
@@ -246,16 +265,22 @@ class System:
         self.reward_scale = reward_scale
         self.punishment = punishment
         
+        if init_steps > epsd_steps:
+            memory_e_capacity = init_steps
+        else:
+            memory_e_capacity = epsd_steps
 
         self.agent = Agent(
             s_dim=self.s_dim,
             a_dim=self.a_dim,
             memory_capacity=memory_capacity,
+            memory_e_capacity=memory_e_capacity,
             batch_size=batch_size,
             reward_scale=reward_scale,
             temperature=temperature,
             soft_lr=soft_lr,
-            GAE=GAE
+            GAE=GAE,
+            IS=IS
         )
     
     def initialization(self):
@@ -269,7 +294,13 @@ class System:
             event[:self.s_dim] = state
             event[self.s_dim:self.sa_dim] = action
             event[self.sa_dim] = reward
-            event[self.sa_dim+1:self.sas_dim+1] = next_state          
+            event[self.sa_dim+1:self.sas_dim+1] = next_state
+            
+            if self.IS:
+                cuda_action = torch.FloatTensor(action).to(device)
+                cuda_state = torch.FloatTensor(state).to(device)
+                p = self.agent.actor.get_prob(cuda_state,cuda_action)
+                event[self.p_dim] = p
 
             if self.GAE:
                 self.agent.memorize_e(event)
@@ -278,8 +309,9 @@ class System:
             
             state = np.copy(next_state)
         
-        De = self.agent.advantage()
-        self.agent.merge(De)
+        if self.GAE:
+            De = self.agent.advantage()
+            self.agent.merge(De)
 
     def scale_action(self, a):
         return (0.5 * (a + 1.0) * (self.max_action - self.min_action) + self.min_action)
@@ -300,12 +332,17 @@ class System:
             if terminated:
                 reward = self.punishment
             r_interact += reward
-            done = terminated or truncated              #Does this do anything?
+            done = terminated or truncated
+
 
             event[:self.s_dim] = state
             event[self.s_dim:self.sa_dim] = action
             event[self.sa_dim] = reward
             event[self.sa_dim+1:self.sas_dim+1] = obs
+
+            if self.IS:
+                p = self.agent.actor.get_prob(cuda_state[0],action)
+                event[self.p_dim] = p
 
             if remember:
                 if self.GAE:

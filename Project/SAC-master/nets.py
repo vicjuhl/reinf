@@ -65,7 +65,6 @@ class Memory:
         Returns the list of observations for the entire episode
         '''
         output = self.data
-        self.clean()
         return output
     
     def clean(self):
@@ -154,6 +153,11 @@ class v_valueNet(nn.Module):
         x = F.relu(self.l2(x))
         x = self.l3(x)
         return(x)
+    
+    def get_loss(self, v, v_detach, w):
+        loss = self.loss_func(v, v_detach)
+        weighted_loss =  w * loss
+        return torch.mean(weighted_loss)
 
 class q_valueNet(nn.Module):
     '''
@@ -183,7 +187,7 @@ class q_valueNet(nn.Module):
         self.l3.weight.data.uniform_(-3e-3, 3e-3)
         self.l3.bias.data.uniform_(-3e-3, 3e-3) 
 
-        self.loss_func = nn.MSELoss()
+        self.loss_func = nn.MSELoss(reduction = 'none')
         self.optimizer = optim.Adam(self.parameters(), lr = 3e-4)    
     
     def forward(self, s,a):
@@ -202,6 +206,12 @@ class q_valueNet(nn.Module):
         x = F.relu(self.l2(x))
         x = self.l3(x)
         return(x)
+    
+    def get_loss(self, q, q_detach, w):
+        loss = self.loss_func(q, q_detach)
+        weighted_loss =  w * loss
+        return torch.mean(weighted_loss)
+
 
 #-------------------------------------------------------------
 #
@@ -265,7 +275,7 @@ class policyNet(nn.Module):
         '''
         m, log_stdev = self(s)
         u = m + log_stdev.exp()*torch.randn_like(m)
-        a = torch.tanh(u).cpu()        
+        a = torch.tanh(u).cpu()   
         return a
     
     def sample_action_and_logstd(self, s):
@@ -278,7 +288,24 @@ class policyNet(nn.Module):
     def sample_action_and_llhood(self, s):
         m, log_stdev = self(s)
         stdev = log_stdev.exp()
-        u = m + stdev*torch.randn_like(m)
+        p = torch.randn_like(m)
+        u = m + stdev*p
         a = torch.tanh(u).cpu()
         llhood = (Normal(m, stdev).log_prob(u) - torch.log(torch.clamp(1 - a.pow(2), 1e-6, 1.0))).sum(dim=1, keepdim=True)
         return a, llhood
+    
+    def get_prob(self, s, a):
+        '''
+        Get the probability for the a given s.
+        '''
+        m, log_stdev = self(s)
+        
+        cov = torch.diag((2*log_stdev).exp())
+        mvn = MultivariateNormal(m, covariance_matrix=cov)
+        u = torch.atanh(a)
+        p = mvn.log_prob(u).exp()
+        return p
+    
+    def get_loss(self, llhood, q_off, w):
+        return torch.mean(w * (llhood - q_off))
+        
