@@ -252,7 +252,8 @@ class policyNet(nn.Module):
         self.l31.bias.data.uniform_(-3e-3, 3e-3)
         self.l32.bias.data.uniform_(-3e-3, 3e-3)
 
-        self.optimizer = optim.Adam(self.parameters(), lr = 3e-4)    
+        self.optimizer = optim.Adam(self.parameters(), lr = 3e-4)  
+        self.normal = torch.distributions.Normal(0.0, 1.0)  
     
     def forward(self, s):
         x = F.relu(self.l1(s))
@@ -275,8 +276,9 @@ class policyNet(nn.Module):
         '''
         m, log_stdev = self(s)
         u = m + log_stdev.exp()*torch.randn_like(m)
-        a = torch.tanh(u).cpu()   
-        return a
+        a = torch.tanh(u).cpu()
+        p = self.get_prob(s,a,m,log_stdev)
+        return a, p
     
     def sample_action_and_logstd(self, s):
         m, log_stdev = self(s)
@@ -294,16 +296,16 @@ class policyNet(nn.Module):
         llhood = (Normal(m, stdev).log_prob(u) - torch.log(torch.clamp(1 - a.pow(2), 1e-6, 1.0))).sum(dim=1, keepdim=True)
         return a, llhood
     
-    def get_prob(self, s, a):
+    def get_prob(self, s, a, m=None, log_stdev=None):
         '''
         Get the probability for the a given s.
         '''
-        m, log_stdev = self(s)
+        if m==None:
+            m, log_stdev = self(s)
         
-        cov = torch.diag((2*log_stdev).exp())
-        mvn = MultivariateNormal(m, covariance_matrix=cov)
         u = torch.atanh(a)
-        p = mvn.log_prob(u).exp()
+        x = (u-m)/log_stdev
+        p = torch.prod(torch.exp(self.normal.log_prob(x)))
         return p
     
     def get_loss(self, llhood, q_off, w):

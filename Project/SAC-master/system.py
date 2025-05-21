@@ -107,8 +107,8 @@ class Agent:
 
     def act(self, state, explore=True):
         with torch.no_grad():
-            action = self.actor.sample_action(state)
-            return action
+            action, p = self.actor.sample_action(state)
+            return action, p
 
     def memorize_e(self, event):
         self.memory_e.store(event[np.newaxis,:])
@@ -117,36 +117,34 @@ class Agent:
         self.memory.store(event[np.newaxis,:])
 
     def advantage(self):
-        episode = self.memory_e.grab()
-        self.memory_e.clean()
-        episode = np.concatenate(episode,axis=0)
-        s = torch.FloatTensor(episode[:,:self.s_dim]).to(device)
-        a = torch.FloatTensor(episode[:,self.s_dim:self.sa_dim]).to(device)
-        r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
-        ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
+        with torch.no_grad():                                   # Disables gradient on A
+            episode = self.memory_e.grab()
+            self.memory_e.clean()
+            episode = np.concatenate(episode,axis=0)
+            s = torch.FloatTensor(episode[:,:self.s_dim]).to(device)
+            # a = torch.FloatTensor(episode[:,self.s_dim:self.sa_dim]).to(device)
+            r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
+            ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
 
-        na, log_stds = self.actor.sample_action_and_logstd(ns)
-        H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi])), dim=1,keepdim=True)
+            na, log_stds = self.actor.sample_action_and_logstd(ns)
+            H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi])), dim=1,keepdim=True)
 
-        q1 = self.critic1(ns, na)
-        q2 = self.critic2(ns, na)
+            q1 = self.critic1(ns, na)
+            q2 = self.critic2(ns, na)
 
-        V = self.baseline(s)
+            V = self.baseline(s)
+            
 
+            delta_hat = r + self.gamma*torch.min(q1,q2) + H - V
+            delta_hat = delta_hat.detach().numpy()
 
-        delta_hat = r + self.gamma*torch.min(q1,q2) + H - V
-        delta_hat = delta_hat.detach().numpy()
+            A = np.zeros(len(episode))
+            for i in range(len(episode)):
+                A[:i+1] += self.gamlam_v[-i-1:] * delta_hat[i][0]
 
-        ## SUPPOSED TO BE IN LOSS. NOT IN ADVANTAGE
-        
+            De = np.concatenate([episode,A.reshape(-1,1)],axis=1)
 
-        A = np.zeros(len(episode))
-        for i in range(len(episode)):
-            A[:i+1] += self.gamlam_v[-i-1:] * delta_hat[i][0]
-
-        De = np.concatenate([episode,A.reshape(-1,1)],axis=1)
-
-        return De
+            return De
 
     def merge(self, De):
         for event in De:
@@ -166,6 +164,9 @@ class Agent:
             p_old = torch.FloatTensor(batch[:,self.p_dim])
             p_new = torch.FloatTensor([self.actor.get_prob(si,ai) for si,ai in zip(s_batch,a_batch)])
             self.w = p_new/p_old
+            self.w[torch.isnan(self.w)] = 1                 # fixes the 0/0 or nan/nan case
+            self.w[self.w > 10] = 10                        # caps the ratio (initialization messes w up)
+            # print(f'w = {self.w}')
 
 
         # Optimize q networks
@@ -295,7 +296,7 @@ class System:
             event[self.s_dim:self.sa_dim] = action
             event[self.sa_dim] = reward
             event[self.sa_dim+1:self.sas_dim+1] = next_state
-            
+
             if self.IS:
                 cuda_action = torch.FloatTensor(action).to(device)
                 cuda_state = torch.FloatTensor(state).to(device)
@@ -325,8 +326,8 @@ class System:
 
         r_interact = 0
         for i in range(0, it):
-            cuda_state = torch.FloatTensor(state).unsqueeze(0).to(device)         
-            action = self.agent.act(cuda_state, explore=learn)
+            cuda_state = torch.FloatTensor(state).unsqueeze(0).to(device) 
+            action, p = self.agent.act(cuda_state, explore=learn)
             scaled_action = self.scale_action(action.detach().cpu().numpy().flatten())
             obs, reward, terminated, truncated, _ = self.env.step(scaled_action)
             if terminated:
@@ -341,7 +342,7 @@ class System:
             event[self.sa_dim+1:self.sas_dim+1] = obs
 
             if self.IS:
-                p = self.agent.actor.get_prob(cuda_state[0],action)
+                #p = self.agent.actor.get_prob(cuda_state[0],action)
                 event[self.p_dim] = p
 
             if remember:
