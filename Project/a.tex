@@ -1,0 +1,87 @@
+\section{Theory}
+In the following, we will use \(J\) to denote objectives which want to maximize and \(L\) losses which we want to minimize.
+\subsection{SAC basics}
+The original SAC algorithm uses three non-linear function approximators \(V_\vparams, Q_\params, \policy_\pparams\). Additionally, \(V_{\bar{\vparams}}\) is an exponentially averaged target value function which stabilizes learning. They each operate with a soft value estimate. The value function of SAC is ``softened'' by mixing the entropy directly into the value estimate in the following way:
+\begin{align}
+    V(\st) &= \mathbb{E}_{\at \sim \pi} \left[Q(\st,\at) - \alpha \log {\pi(\at|\st)}\right]
+    = \mathbb{E}_{\at \sim \pi} \left[Q(\st,\at)\right] + \alpha \mathcal{H}( {\pi(\cdot|\st))} \label{eq:V}
+\end{align}
+where \(\mathcal{H}\) is the entropy and \(\alpha\) is an entropy temperature parameter, balancing the magnitude of entropy against rewards. The objective of \(V\) is 
+\begin{align}    
+    L_{V}(\vparams) &= \mathbb{E}_{\st \sim D} \left[ \frac{1}{2} \left( \mathbb{E}_{\at \sim \pi_\phi} \left[ Q(\st, \at) - \alpha \log \pi(\cdot| \st) \right]  - V(\st) \right)^2 \right] \notag \\
+    &= \mathbb{E}_{\st \sim D} \left[ \frac{1}{2} \left( \mathbb{E}_{\at \sim \pi_\phi} \left[ Q(\st, \at) + \alpha \mathcal{H}(\pi(\cdot|\st)) \right]  - V(\st) \right)^2 \right]
+\end{align}
+which seeks to align \(V\) with the current \(Q\) and \(\pi\) functions according to \eqref{eq:V}. The objective for \(Q\) is
+\begin{align}
+    L_Q(\params) &= \mathbb{E}_{(\st,\at) \sim D} \left[ \frac{1}{2} \left( r(\st, \at) + \gamma \mathbb{E}_{\stp \sim p}[V_{\bar{\vparams}}(\stp)] - Q(\st,\at)  \right)^2 \right]
+\end{align}
+which gathers information from the environment to update the values of state/action-pairs through bootstrapped temporal difference (TD) errors. On the actor side, the policy objective is
+\begin{align}
+    J_\pi(\pparams) &= \mathbb{E}_{\st \sim D} \left[ \mathbb{E}_{\at \sim \pi_\phi} \left[ Q_\params(\st, \at) - {\alpha \log \policy_\pparams(\at | \st) }  \right] \right] \notag\\
+    &= \mathbb{E}_{\st \sim D} \left[
+        \mathbb{E}_{\at \sim \pi_\phi} \left[ Q_\params(\st, \at) \right]
+        + \alpha \mathcal{H}(\policy_\pparams(\cdot | \st))
+    \right]. \label{eq:J_pi_SAC}
+\end{align}
+Here, we also see that both the entropy and the soft value optimization are optimized directly, ideally keeping each other in check. One term pushes for entropy, the other for exploitation.
+
+\subsection{GAE's \(\hat{A}\)}
+For the reasons discussed, the most viable way to implement \(\lambda\)-returns is through forward-view. In particual, the Generalized Advantage Estimate \(\hat{A}\) seems useful. We will adapt its definition from the original paper, which is
+\begin{equation}
+    \hat{A}_t = \sum_{l=0}^\infty {(\lambda\gamma)^l \delta_{t+l}^V}
+\end{equation}
+where $\gamma$ is the discount factor, $\delta^V$ is the bootstrapped TD-error, and $\lambda$ is the trace decay factor which scales the elegibilty trace parameter governing the time horizon of state importance. We found it most natural to define
+\begin{align}
+    \label{eq:delta_V}
+    \delta_t^V &:=  r(\st, \at) + \gamma\mathbb{E}_{\atp \sim \pi_\phi} \left[Q(\stp,\atp) - \alpha \log{\pi(\atp|\stp)}\right]- V(\st) \notag\\
+    &= \underbrace{r(\st, \at) + \gamma\left(
+        \mathbb{E}_{\atp \sim \pi_\phi}\left[Q(\stp,\atp)\right] + \alpha \mathcal{H}[\pi(\cdot | \st)]
+    \right)}_{=: \hat{V}(\st)} - V(\st).
+\end{align}
+One nice property of this formulation is that the entropy can be analytically derived. The policy's output defines a \(|\mathcal{A}|\)-dimensional gaussian distribution with diagonal covariance matrix whose diagonal is \(\sigma_1, \sigma_2, \ldots \sigma_{|\mathcal{A}|}\). The entropy of such a distribution can be derived exactly as
+\begin{align}
+    \mathcal{H}[\pi(\cdot | \st)] = \frac{1}{2} \sum_{i=1}^{|\mathcal{A}|}\log(2 \pi e \sigma_i^2), \label{eq:H}
+\end{align}
+eliminating the need to sample for that part. \(\pi\) here is the constant \(\approx 3.14\), not the policy function. The expectation of \(Q\), however, can not computed analytically, so we compute a noisier but no more biased estimate of \(\delta\) by sampling \(\atp \sim \policy(\cdot | \stp)\) and use this to obtain
+\begin{align}
+    \hat{\delta}_t^V &=  r(\st, \at) + \gamma\left(
+        Q(\stp,\atp) + \alpha \left(\frac{1}{2} \sum_{i=1}^{|\mathcal{A}|}\log(2 \pi \sigma_i^2)
+    \right)\right) - V(\st).
+\end{align}
+It would also be feasible to use the already sampled \(\atp\) from the buffer, since neither option introduces bias.
+
+The policy objective of the GAE-paper is
+\begin{align}
+    L_\policy(\pparams_\text{old}) = -\mathbb{E}_{(\st, \at) \sim \mathcal{D}} \left[ \frac{\policy_\pparams(\at | \st)}{\mu(\at | \st)} \hat{A} \right] \label{eq:L_pi_GAE}
+\end{align}
+where \(\mu(\at |\st)\) is the probability of sampling the action under the policy at the time, acting to scale the loss according to sampling probability. This is a kind of importance sampling, but a special version in which we optimize the numerator. \(L_\pi\) has the opposite sign of \(\hat{A}\), so good behavior is encouraged by increasing the probability of the action that led to the trajectory from which \(\hat{A}\) arose. The minus sign is missing in the paper. We believe that this is a mistake.
+
+In our policy loss, we combine two terms: \(L_1\) that encourages behavior that lead to positive soft rewards, and \(L_2\) which encourages entropy. We define
+\begin{align}
+    L_\policy(\pparams) &= \underbrace{\mathbb{E}_{(\st, \at) \sim \mathcal{D}}\left[- \hat{A}_t \log \policy(\at | \st) \right]}_{L_1}
+    + \underbrace{\mathbb{E}_{(\st) \sim \mathcal{D}}\left[- \alpha \mathcal{H}(\policy(\cdot | \st)) \right]}_{L_2} \\
+    &= - \mathbb{E}_{(\st, \at) \sim \mathcal{D}}\left[\hat{A}_t \log \policy(\at | \st) + \alpha \mathcal{H}(\policy(\cdot | \st)) \right].
+\end{align}
+\(L_1\) aligns closely with REINFORCE. Here, \(L_1\) has the same sign as \(\hat{A}\) which might seem odd at first (advantage is good and loss is bad, after all), but observe that any positive advantage (which has positive loss) should be made more probably, so \(\policy(\at |\st)\) is pushed towards higher values, decreasing \(- \log \policy(\at |\st)\) and thereby the loss. But the magnitude of the loss is non-linear unlike the linear scaling of \eqref{eq:L_pi_GAE}. This means that surprising (low probability) actions amplify the gradient. \(L_2\) constantly attempts to push \(\pi\) towards larger entropy. Our hope is that the two terms will balance each other out as in \eqref{eq:J_pi_SAC}. The gradient of the policy loss is
+\begin{align}
+    \nabla_\pparams L_\pi(\pparams) &= - \mathbb{E}_{(\st, \at) \sim \mathcal{D}}\left[\hat{A}_t \log \nabla_\pparams \policy(\at | \st) + \alpha \nabla_\pparams \mathcal{H}(\policy(\cdot | \st)) \right] \notag \\
+    &\overset{\eqref{eq:H}}{=} - \mathbb{E}_{(\st, \at) \sim \mathcal{D}}\left[\hat{A}_t \log \nabla_\pparams \policy(\at | \st) + \alpha \nabla_\pparams \frac{1}{2} \sum_{i=1}^{|\mathcal{A}|}\log(2 \pi e \sigma_{\pparams, i}^2) \right] \notag \\
+    &= - \mathbb{E}_{(\st, \at) \sim \mathcal{D}}\left[\hat{A}_t \log \nabla_\pparams \policy(\at | \st) + \frac{\alpha}{2} \sum_{i=1}^{|\mathcal{A}|}\nabla_\pparams \log(\sigma_i^2) \right] + \text{some constant}.
+\end{align}
+
+We introduce importance sampling for all loss functions to account for the difference in data significance between the old and new policy. To curtail runaway weights (at the cost of some sampling probability bias), a small constant \(k\) is added in the denominator of the weights. For the policy-loss, this amounts to
+\begin{equation}
+    J_\pi(\pparams) = \mathbb{E}_{(\st,\at)\sim D} \left[\frac{\pi(\at|\st)}{\mu(\at|\st) + k}\hat{A}(\st,\at)\right]
+    = \mathbb{E}_{(\st,\at)\sim D} \left[w(\at,\st)\hat{A}(\st,\at)\right].
+\end{equation}
+For the remaining \(Q\) and \(V\) losses, the same linear importance sampling weight \(w\) is applied outside the quadratic function because the loss itself is supposed to be scaled. As for regular SAC, stochastic gradients are attained for all loss functions by mini-batch sampling from the buffer. The stochastic gradient for the loss of the policy network is.
+
+
+\subsubsection{Offline learning}
+\subsubsection{How to combine}
+- Justify!\\
+- Pseudocode
+\subsection{Ablation seetings}
+
+
+
