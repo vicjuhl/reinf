@@ -313,7 +313,7 @@ class policyNet(nn.Module):
     
     def get_loss_GAE(self, llhood, A, log_stdev, w):
         # print(f'log_stdev = {log_stdev}')
-        # return - torch.mean(w * (A * llhood + torch.sum(log_stdev,dim=1)))
+        return - torch.mean(w * (A * llhood + torch.sum(log_stdev,dim=1)))
         # return - torch.mean(w * (A * llhood))
-        return - torch.mean(w * A)                  #all disconnected
+        # return - torch.mean(w * A)                  #all disconnected
         
