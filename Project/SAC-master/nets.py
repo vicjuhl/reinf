@@ -40,7 +40,7 @@ class Memory:
         capacity -- positive int number
         '''
         self.capacity = capacity
-        self.data = []        
+        self.data = []      
         self.pointer = 0
 
     
@@ -54,11 +54,23 @@ class Memory:
         event -- tuple to be stored
         '''
         if len(self.data) < self.capacity:
-            self.data.append(None)
-        self.data[self.pointer] = event
+            self.data.append(event)
+        else:
+            self.data[self.pointer] = event
         self.pointer = (self.pointer + 1) % self.capacity
 
+    def grab(self):
+        '''
+        Description:
+        Returns the list of observations for the entire episode
+        '''
+        output = self.data
+        return output
     
+    def clean(self):
+        self.data = []
+        self.pointer = 0
+
     def sample(self, batch_size):
         '''
         Description:
@@ -141,6 +153,11 @@ class v_valueNet(nn.Module):
         x = F.relu(self.l2(x))
         x = self.l3(x)
         return(x)
+    
+    def get_loss(self, v, v_detach, w):
+        loss = self.loss_func(v, v_detach)
+        weighted_loss =  w * loss
+        return torch.mean(weighted_loss)
 
 class q_valueNet(nn.Module):
     '''
@@ -170,7 +187,7 @@ class q_valueNet(nn.Module):
         self.l3.weight.data.uniform_(-3e-3, 3e-3)
         self.l3.bias.data.uniform_(-3e-3, 3e-3) 
 
-        self.loss_func = nn.MSELoss()
+        self.loss_func = nn.MSELoss(reduction = 'none')
         self.optimizer = optim.Adam(self.parameters(), lr = 3e-4)    
     
     def forward(self, s,a):
@@ -189,6 +206,12 @@ class q_valueNet(nn.Module):
         x = F.relu(self.l2(x))
         x = self.l3(x)
         return(x)
+    
+    def get_loss(self, q, q_detach, w):
+        loss = self.loss_func(q, q_detach)
+        weighted_loss =  w * loss
+        return torch.mean(weighted_loss)
+
 
 #-------------------------------------------------------------
 #
@@ -229,7 +252,8 @@ class policyNet(nn.Module):
         self.l31.bias.data.uniform_(-3e-3, 3e-3)
         self.l32.bias.data.uniform_(-3e-3, 3e-3)
 
-        self.optimizer = optim.Adam(self.parameters(), lr = 3e-4)    
+        self.optimizer = optim.Adam(self.parameters(), lr = 3e-4)  
+        self.normal = torch.distributions.Normal(0.0, 1.0)  
     
     def forward(self, s):
         x = F.relu(self.l1(s))
@@ -252,13 +276,38 @@ class policyNet(nn.Module):
         '''
         m, log_stdev = self(s)
         u = m + log_stdev.exp()*torch.randn_like(m)
-        a = torch.tanh(u).cpu()        
-        return a
-
-    def sample_action_and_llhood(self, s):
+        a = torch.tanh(u).cpu()
+        p = self.get_prob(s,a,m,log_stdev)
+        return a, p
+    
+    def sample_action_and_logstd(self, s):
         m, log_stdev = self(s)
         stdev = log_stdev.exp()
         u = m + stdev*torch.randn_like(m)
         a = torch.tanh(u).cpu()
+        return a, log_stdev
+
+    def sample_action_and_llhood(self, s):
+        m, log_stdev = self(s)
+        stdev = log_stdev.exp()
+        p = torch.randn_like(m)
+        u = m + stdev*p
+        a = torch.tanh(u).cpu()
         llhood = (Normal(m, stdev).log_prob(u) - torch.log(torch.clamp(1 - a.pow(2), 1e-6, 1.0))).sum(dim=1, keepdim=True)
         return a, llhood
+    
+    def get_prob(self, s, a, m=None, log_stdev=None):
+        '''
+        Get the probability for the a given s.
+        '''
+        if m==None:
+            m, log_stdev = self(s)
+        
+        u = torch.atanh(a)
+        x = (u-m)/log_stdev
+        p = torch.exp(torch.sum(self.normal.log_prob(x)))
+        return p
+    
+    def get_loss(self, llhood, q_off, w):
+        return torch.mean(w * (llhood - q_off))
+        
