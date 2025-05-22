@@ -66,7 +66,7 @@ class Agent:
     '''
 
     def __init__(self, s_dim=2, a_dim=1, memory_capacity=50000, memory_e_capacity = 50000, batch_size=64, discount_factor=0.99, temperature=1.0,
-        soft_lr=5e-3, reward_scale=1.0, lambda_h=1, GAE=False, IS=False):
+        soft_lr=5e-3, reward_scale=1.0, lambda_h=0, GAE=False, IS=False):
         '''
         Initializes the agent.
 
@@ -80,6 +80,7 @@ class Agent:
         self.sa_dim = self.s_dim + self.a_dim
         self.sas_dim = self.sa_dim + self.s_dim  
         self.p_dim = self.sas_dim + IS
+        self.A_dim = self.p_dim + GAE
         self.batch_size = batch_size 
         self.gamma = discount_factor
         self.lambda_h = lambda_h
@@ -104,8 +105,8 @@ class Agent:
 
         #Weights for IS (not the most efficient way but whatever)
         self.w = torch.ones(batch_size)
-        self.threshold = 0.001
-        self.w_min = 0.25
+        self.threshold = 0.1
+        self.w_min = 0.1
 
         updateNet(self.baseline_target, self.baseline, 1.0) 
 
@@ -131,7 +132,7 @@ class Agent:
             ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
 
             na, log_stds = self.actor.sample_action_and_logstd(ns)
-            H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi])), dim=1,keepdim=True)
+            H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
 
             q1 = self.critic1(ns, na)
             q2 = self.critic2(ns, na)
@@ -147,6 +148,7 @@ class Agent:
                 A[:i+1] += self.gamlam_v[-i-1:] * delta_hat[i][0]
 
             De = np.concatenate([episode,A.reshape(-1,1)],axis=1)
+
 
             return De
 
@@ -165,11 +167,12 @@ class Agent:
         ns_batch = torch.FloatTensor(batch[:,self.sa_dim+1:self.sa_dim+1+self.s_dim]).to(device)
 
         if self.IS:
-            p_old = torch.FloatTensor(batch[:,self.p_dim])
-            p_new = torch.FloatTensor([self.actor.get_prob(si,ai) for si,ai in zip(s_batch,a_batch)])
-            self.w = p_new/(p_old + self.threshold)
-            self.w[self.w < self.w_min] = self.w_min            # floors the ratio (initialization messes w up)
-            # print(f'w = {self.w}')
+            with torch.no_grad():
+                p_old = torch.FloatTensor(batch[:,self.p_dim])
+                p_new = self.actor.get_prob(s_batch, a_batch)
+                self.w = p_new/(p_old + self.threshold)
+                self.w[self.w < self.w_min] = self.w_min            # floors the ratio (initialization messes w up)
+                # print(f'w = {self.w}')
 
 
         # Optimize q networks
@@ -190,7 +193,7 @@ class Agent:
 
         # Optimize v network
         v = self.baseline(s_batch)
-        a_batch_off, llhood = self.actor.sample_action_and_llhood(s_batch)                
+        a_batch_off, llhood, log_stdev = self.actor.sample_action_and_llhood_and_logstdev(s_batch)                
         q1_off = self.critic1(s_batch, a_batch_off)
         q2_off = self.critic2(s_batch, a_batch_off)
         q_off = torch.min(q1_off, q2_off)          
@@ -202,7 +205,12 @@ class Agent:
         self.baseline.optimizer.step()
         
         # Optimize policy network
-        pi_loss = self.actor.get_loss(llhood, q_off, self.w)
+        if self.GAE:
+            A = torch.FloatTensor(batch[:,self.A_dim]).to(device)
+            pi_loss = self.actor.get_loss_GAE(llhood, A, log_stdev, self.w)
+        else:
+            pi_loss = self.actor.get_loss_SAC(llhood, q_off, self.w)
+        
         self.actor.optimizer.zero_grad()
         pi_loss.backward()
         self.actor.optimizer.step()
@@ -365,7 +373,8 @@ class System:
             self.agent.merge(De)
 
         if learn:
-            for _ in range(0, self.grad_steps):
+            grad_steps = self.grad_steps if not self.GAE else i+1
+            for _ in range(0, grad_steps):
                 self.agent.learn()
         
         return done, obs, r_interact, i+1
