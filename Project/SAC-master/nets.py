@@ -305,7 +305,7 @@ class policyNet(nn.Module):
         
         u = torch.atanh(a)
         x = (u-m)/log_stdev
-        p = torch.prod(torch.exp(self.normal.log_prob(x)))
+        p = torch.exp(torch.sum(self.normal.log_prob(x)))
         return p
     
     def get_loss(self, llhood, q_off, w):

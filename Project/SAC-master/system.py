@@ -88,6 +88,8 @@ class Agent:
         self.reward_scale = reward_scale
         self.GAE = GAE
         self.IS = IS
+        
+
 
          
         self.memory = Memory(memory_capacity)
@@ -102,6 +104,8 @@ class Agent:
 
         #Weights for IS (not the most efficient way but whatever)
         self.w = torch.ones(batch_size)
+        self.threshold = 0.001
+        self.w_min = 0.25
 
         updateNet(self.baseline_target, self.baseline, 1.0) 
 
@@ -163,9 +167,8 @@ class Agent:
         if self.IS:
             p_old = torch.FloatTensor(batch[:,self.p_dim])
             p_new = torch.FloatTensor([self.actor.get_prob(si,ai) for si,ai in zip(s_batch,a_batch)])
-            self.w = p_new/p_old
-            self.w[torch.isnan(self.w)] = 1                 # fixes the 0/0 or nan/nan case
-            self.w[self.w > 10] = 10                        # caps the ratio (initialization messes w up)
+            self.w = p_new/(p_old + self.threshold)
+            self.w[self.w < self.w_min] = self.w_min            # floors the ratio (initialization messes w up)
             # print(f'w = {self.w}')
 
 
