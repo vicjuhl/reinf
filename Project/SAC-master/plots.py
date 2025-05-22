@@ -88,6 +88,6 @@ def plot_system(system_name, algs, total_steps):
     plt.close()
 
 # plot_system("Pendulum-v1", ["SAC", "SAC2"], 200)
-plot_system("Hopper-v4", ["SAC"], int(1e6))
-plot_system("HalfCheetah-v4", ["SAC"], int(1e6))
-plot_system("Ant-v4", ["SAC"], int(1e6))
+plot_system("Hopper-v4", ["SAC"], int(5e5))
+plot_system("HalfCheetah-v4", ["SAC"], int(5e5))
+plot_system("Ant-v4", ["SAC"], int(5e5))
