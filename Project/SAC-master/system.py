@@ -66,7 +66,7 @@ class Agent:
     '''
 
     def __init__(self, s_dim=2, a_dim=1, memory_capacity=50000, memory_e_capacity = 50000, batch_size=64, discount_factor=0.99, temperature=1.0,
-        soft_lr=5e-3, reward_scale=1.0, lambda_h=0, GAE=False, IS=False):
+        soft_lr=5e-3, reward_scale=1.0, lambda_h=0.96, GAE=False, IS=False):
         '''
         Initializes the agent.
 
@@ -122,35 +122,35 @@ class Agent:
         self.memory.store(event[np.newaxis,:])
 
     def advantage(self):
-        with torch.no_grad():                                   # Disables gradient on A
-            episode = self.memory_e.grab()
-            self.memory_e.clean()
-            episode = np.concatenate(episode,axis=0)
-            s = torch.FloatTensor(episode[:,:self.s_dim]).to(device)
-            # a = torch.FloatTensor(episode[:,self.s_dim:self.sa_dim]).to(device)
-            r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
-            ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
+        # with torch.no_grad():                                   # Disables gradient on A
+        episode = self.memory_e.grab()
+        self.memory_e.clean()
+        episode = np.concatenate(episode,axis=0)
+        s = torch.FloatTensor(episode[:,:self.s_dim]).to(device)
+        # a = torch.FloatTensor(episode[:,self.s_dim:self.sa_dim]).to(device)
+        r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
+        ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
 
-            na, log_stds = self.actor.sample_action_and_logstd(ns)
-            H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
+        na, log_stds = self.actor.sample_action_and_logstd(ns)
+        H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
 
-            q1 = self.critic1(ns, na)
-            q2 = self.critic2(ns, na)
+        q1 = self.critic1(ns, na)
+        q2 = self.critic2(ns, na)
 
-            V = self.baseline(s)
-            
+        V = self.baseline(s)
+        
 
-            delta_hat = r + self.gamma*torch.min(q1,q2) + H - V
-            delta_hat = delta_hat.detach().numpy()
+        delta_hat = r + self.gamma*(torch.min(q1,q2) + H) - V
+        delta_hat = delta_hat.detach().numpy()
 
-            A = np.zeros(len(episode))
-            for i in range(len(episode)):
-                A[:i+1] += self.gamlam_v[-i-1:] * delta_hat[i][0]
+        A = np.zeros(len(episode))
+        for i in range(len(episode)):
+            A[:i+1] += self.gamlam_v[-i-1:] * delta_hat[i][0]
 
-            De = np.concatenate([episode,A.reshape(-1,1)],axis=1)
+        De = np.concatenate([episode,A.reshape(-1,1)],axis=1)
 
 
-            return De
+        return De
 
     def merge(self, De):
         for event in De:
