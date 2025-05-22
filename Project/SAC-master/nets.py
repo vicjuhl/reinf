@@ -287,14 +287,14 @@ class policyNet(nn.Module):
         a = torch.tanh(u).cpu()
         return a, log_stdev
 
-    def sample_action_and_llhood(self, s):
+    def sample_action_and_llhood_and_logstdev(self, s):
         m, log_stdev = self(s)
         stdev = log_stdev.exp()
         p = torch.randn_like(m)
         u = m + stdev*p
         a = torch.tanh(u).cpu()
         llhood = (Normal(m, stdev).log_prob(u) - torch.log(torch.clamp(1 - a.pow(2), 1e-6, 1.0))).sum(dim=1, keepdim=True)
-        return a, llhood
+        return a, llhood, log_stdev
     
     def get_prob(self, s, a, m=None, log_stdev=None):
         '''
@@ -305,9 +305,13 @@ class policyNet(nn.Module):
         
         u = torch.atanh(a)
         x = (u-m)/log_stdev
-        p = torch.exp(torch.sum(self.normal.log_prob(x)))
+        p = torch.exp(torch.sum(self.normal.log_prob(x),dim=-1))
         return p
     
-    def get_loss(self, llhood, q_off, w):
+    def get_loss_SAC(self, llhood, q_off, w):
         return torch.mean(w * (llhood - q_off))
+    
+    def get_loss_GAE(self, llhood, A, log_stdev, w):
+        # print(f'log_stdev = {log_stdev}')
+        return - torch.mean(w * (A * llhood + torch.sum(log_stdev,dim=1)))
         
