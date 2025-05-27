@@ -10,6 +10,7 @@ from itertools import count
 from sys import stdout
 import pickle
 import time
+import math
 
 # Device configuration
 device = (
@@ -66,7 +67,7 @@ class Agent:
     '''
 
     def __init__(self, s_dim=2, a_dim=1, memory_capacity=50000, memory_e_capacity = 50000, batch_size=64, discount_factor=0.99, temperature=1.0,
-        soft_lr=5e-3, reward_scale=1.0, lambda_h=0.96, GAE=False, IS=False):
+        soft_lr=5e-3, reward_scale=1.0, lambda_h=0.95, GAE=False, IS=False):
         '''
         Initializes the agent.
 
@@ -90,8 +91,10 @@ class Agent:
         self.GAE = GAE
         self.IS = IS
         
-
-
+        self.alpha = 1.0
+        self.log_alpha = math.log(self.alpha)
+        self.alpha_lr = 1e-2
+        self.target_entropy = -a_dim
          
         self.memory = Memory(memory_capacity)
         self.memory_e = Memory(memory_e_capacity)
@@ -102,6 +105,8 @@ class Agent:
         self.baseline_target = v_valueNet(s_dim).to(device) 
 
         self.gamlam_v = np.flip(np.array([(self.gamma*self.lambda_h)**i for i in range(memory_e_capacity)])) # TODO should be fixed for class
+
+        self.v_loss = []
 
         #Weights for IS (not the most efficient way but whatever)
         self.w = torch.ones(batch_size)
@@ -131,16 +136,17 @@ class Agent:
         r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
         ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
 
-        na, log_stds = self.actor.sample_action_and_logstd(ns)
-        H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
+        # na, log_stds = self.actor.sample_action_and_logstd(ns)
+        # H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
 
-        q1 = self.critic1(ns, na)
-        q2 = self.critic2(ns, na)
+        # q1 = self.critic1(ns, na)
+        # q2 = self.critic2(ns, na)
 
         V = self.baseline(s)
+        V_hat = self.baseline_target(ns)
         
-
-        delta_hat = r + self.gamma*(torch.min(q1,q2) + H) - V
+        # delta_hat = r + self.gamma*(torch.min(q1,q2)) + H - V
+        delta_hat = r + V_hat - V
         delta_hat = delta_hat.detach().numpy()
 
         A = np.zeros(len(episode))
@@ -200,6 +206,7 @@ class Agent:
         v_approx = q_off - self.alpha*llhood
 
         v_loss = self.baseline.get_loss(v, v_approx.detach(),self.w)
+        self.v_loss.append(v_loss.detach().item())
         self.baseline.optimizer.zero_grad()
         v_loss.backward()
         self.baseline.optimizer.step()
@@ -207,16 +214,44 @@ class Agent:
         # Optimize policy network
         if self.GAE:
             A = torch.FloatTensor(batch[:,self.A_dim]).to(device)
-            pi_loss = self.actor.get_loss_GAE(llhood, A, log_stdev, self.w)
+            print(f"Var A: {A.var().item():.3f}")
+            pi_loss = self.actor.get_loss_GAE(llhood, A, log_stdev, self.alpha, self.w)
         else:
             pi_loss = self.actor.get_loss_SAC(llhood, q_off, self.w)
-        
+
+        self.update_alpha(llhood, log_stdev)
+
         self.actor.optimizer.zero_grad()
         pi_loss.backward()
         self.actor.optimizer.step()
 
         # Update v target network
         updateNet(self.baseline_target, self.baseline, self.soft_lr)
+
+    def update_alpha(self, llhood, log_stdev):
+        if isinstance(llhood, torch.Tensor):
+            llhood = llhood.detach().cpu().numpy()
+        
+        entropy = -llhood.mean()
+        # For Gaussian policy with tanh squashing, analytical entropy is:
+        # H = sum_i (log(2π) + 1)/2 + log_stdev_i
+        # This matches the entropy term in get_loss_GAE
+        # analytical_entropy = np.sum(1/2 * np.log(2*np.pi*np.exp(1)) + log_stdev.detach().cpu().numpy(), axis=1).mean()
+        # entropy = analytical_entropy
+        entropy_error = entropy - self.target_entropy  # gradient of -alpha*(H + target)
+
+        # log_alpha gradient: d/d log_alpha = alpha * d/d alpha
+        # So we directly optimize: loss = -log_alpha * (H + target)
+        # Update log_alpha with gradient ascent
+        self.log_alpha -= self.alpha_lr * entropy_error
+
+        # Clamp log_alpha to a reasonable range
+        self.log_alpha = np.clip(self.log_alpha, np.log(1e-3), np.log(1e2))
+
+        # Get alpha from log_alpha
+        self.alpha = float(np.exp(self.log_alpha))
+
+        print(f"[Alpha Update] Entropy: {entropy:.3f}, Target: {self.target_entropy:.3f}, dlogalpha: {-self.alpha_lr * entropy_error:.3f}, α: {self.alpha:.5f}")
 
 #-------------------------------------------------------------
 #
@@ -287,6 +322,7 @@ class System:
             a_dim=self.a_dim,
             memory_capacity=memory_capacity,
             memory_e_capacity=memory_e_capacity,
+            lambda_h=0,
             batch_size=batch_size,
             reward_scale=reward_scale,
             temperature=temperature,
@@ -373,7 +409,7 @@ class System:
             self.agent.merge(De)
 
         if learn:
-            grad_steps = self.grad_steps if not self.GAE else i+1
+            grad_steps = self.grad_steps if not self.GAE else 20#i+1
             for _ in range(0, grad_steps):
                 self.agent.learn()
         
@@ -430,5 +466,14 @@ class System:
             print(f"Finished epsd {epsd+1} in\t{epsd_step+1} steps.\tTotal steps {steps_performed},\tepsd_total_r: {epsd_total_reward:.4f}")
             epsd += 1
             time.sleep(0.0001)
+        # Plot v_loss over training
+        import matplotlib.pyplot as plt
+        plt.figure()
+        plt.plot(self.agent.v_loss)
+        plt.xlabel('Episodes')
+        plt.ylabel('V Network Loss')
+        plt.title('Value Network Loss During Training')
+        plt.savefig('v_loss.png')
+        plt.close()
         print("")     
         return results

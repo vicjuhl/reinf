@@ -37,6 +37,7 @@ def run_env(proc_id, alg, system_type, reward_scale, punishment, total_steps, ep
         punishment=punishment,
         epsd_steps=epsd_steps,
         video_freq=None,#total_steps // 5, # TODO: will this begin videos in the middle of episodes?
+        memory_capacity=1000,
         proc_id=proc_id,
         GAE = GAE,
         IS = IS,

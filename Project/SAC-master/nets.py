@@ -259,8 +259,12 @@ class policyNet(nn.Module):
         x = F.relu(self.l1(s))
         x = F.relu(self.l2(x))
         m = self.l31(x)
-        log_stdev = self.l32(x)
-        log_stdev = torch.clamp(log_stdev, self.min_log_stdev, self.max_log_stdev)
+        raw_log_stdev = self.l32(x)  # unconstrained output
+
+        # map raw_log_stdev smoothly to [min_log_stdev, max_log_stdev]
+        # e.g. using scaled tanh:
+        log_stdev = 0.5 * (self.max_log_stdev - self.min_log_stdev) * torch.tanh(raw_log_stdev) + \
+                    0.5 * (self.max_log_stdev + self.min_log_stdev)
         return m, log_stdev
     
     def sample_action(self, s):
@@ -309,11 +313,26 @@ class policyNet(nn.Module):
         return p
     
     def get_loss_SAC(self, llhood, q_off, w):
+        print(f"log pi: {llhood[0].item():.3f}\t| Q: {q_off[0].item():.3f}\t| diff: {(llhood - q_off)[0][0]:.3f}\t| w: {w[0].item():.3f}")
         return torch.mean(w * (llhood - q_off))
     
-    def get_loss_GAE(self, llhood, A, log_stdev, w):
-        # print(f'log_stdev = {log_stdev}')
-        return - torch.mean(w * (A * llhood + torch.sum(log_stdev,dim=1)))
-        # return - torch.mean(w * (A * llhood))
-        # return - torch.mean(w * A)                  #all disconnected
+    def get_loss_GAE(self, llhood, A, log_stdev, alpha, w):
+        A = (A - torch.mean(A)) / (torch.std(A) + 1e-8)
+
+        # entropy_const = 0.5 * torch.log(2 * torch.pi * torch.exp(torch.tensor(1.0)))
+        # entropy = torch.sum(entropy_const + log_stdev, dim=1)  # shape: (batch_size,)
+        entropy = -llhood.mean()
+
+        log_pi = torch.squeeze(llhood)  # shape: (batch_size,)
+
+        total = A * log_pi + alpha * entropy  # shape: (batch_size,)
+
+        print(f"log pi:   {log_pi[0].item():.4f}",
+            f"\tH:      {log_stdev[0].mean().item():.4f}",
+            f"\tÂ:      {A[0].item():.4f}",
+            f"\tsum:    {total[0].item():.4f}",
+            f"\tw:      {w[0].item():.4f}")
+
+        return -torch.mean(w * total)
+        # return - torch.mean(w * (A * llhood))# + 10 * torch.sum(log_stdev,dim=1)))
         
