@@ -93,8 +93,8 @@ class Agent:
         
         self.alpha = 1.0
         self.log_alpha = math.log(self.alpha)
-        self.alpha_lr = 1e-2
-        self.target_entropy = -a_dim
+        self.alpha_lr = 1e-3
+        self.target_entropy = 0#-a_dim
          
         self.memory = Memory(memory_capacity)
         self.memory_e = Memory(memory_e_capacity)
@@ -107,6 +107,9 @@ class Agent:
         self.gamlam_v = np.flip(np.array([(self.gamma*self.lambda_h)**i for i in range(memory_e_capacity)])) # TODO should be fixed for class
 
         self.v_loss = []
+        self.alpha_history = []
+        self.entropy_history = []
+        self.critic1_loss_history = []
 
         #Weights for IS (not the most efficient way but whatever)
         self.w = torch.ones(batch_size)
@@ -127,7 +130,6 @@ class Agent:
         self.memory.store(event[np.newaxis,:])
 
     def advantage(self):
-        # with torch.no_grad():                                   # Disables gradient on A
         episode = self.memory_e.grab()
         self.memory_e.clean()
         episode = np.concatenate(episode,axis=0)
@@ -162,7 +164,6 @@ class Agent:
         for event in De:
             self.memorize(event)
 
-
     def learn(self):        
         batch = self.memory.sample(self.batch_size)
         batch = np.concatenate(batch, axis=0)
@@ -190,6 +191,7 @@ class Agent:
         q1_loss = self.critic1.get_loss(q1, q_approx.detach(),self.w)
         self.critic1.optimizer.zero_grad()
         q1_loss.backward()
+        self.critic1_loss_history.append(q1_loss.detach().item())
         self.critic1.optimizer.step()
         
         q2_loss = self.critic2.get_loss(q2, q_approx.detach(),self.w)
@@ -205,28 +207,30 @@ class Agent:
         q_off = torch.min(q1_off, q2_off)          
         v_approx = q_off - self.alpha*llhood
 
-        v_loss = self.baseline.get_loss(v, v_approx.detach(),self.w)
-        self.v_loss.append(v_loss.detach().item())
+        v_loss = self.baseline.get_loss(v, v_approx.detach(), self.w)
         self.baseline.optimizer.zero_grad()
         v_loss.backward()
+        self.v_loss.append(v_loss.detach().item())
         self.baseline.optimizer.step()
         
         # Optimize policy network
         if self.GAE:
-            A = torch.FloatTensor(batch[:,self.A_dim]).to(device)
-            print(f"Var A: {A.var().item():.3f}")
+            A = torch.tensor(batch[:,self.A_dim], requires_grad=False).to(device)
             pi_loss = self.actor.get_loss_GAE(llhood, A, log_stdev, self.alpha, self.w)
         else:
             pi_loss = self.actor.get_loss_SAC(llhood, q_off, self.w)
-
-        self.update_alpha(llhood, log_stdev)
 
         self.actor.optimizer.zero_grad()
         pi_loss.backward()
         self.actor.optimizer.step()
 
+        self.update_alpha(llhood, log_stdev)
+
         # Update v target network
         updateNet(self.baseline_target, self.baseline, self.soft_lr)
+
+        self.alpha_history.append(self.alpha)
+        self.entropy_history.append(-llhood.detach().mean().item())
 
     def update_alpha(self, llhood, log_stdev):
         if isinstance(llhood, torch.Tensor):
@@ -246,12 +250,12 @@ class Agent:
         self.log_alpha -= self.alpha_lr * entropy_error
 
         # Clamp log_alpha to a reasonable range
-        self.log_alpha = np.clip(self.log_alpha, np.log(1e-3), np.log(1e2))
+        self.log_alpha = np.clip(self.log_alpha, np.log(1e-3), np.log(10))
 
         # Get alpha from log_alpha
         self.alpha = float(np.exp(self.log_alpha))
 
-        print(f"[Alpha Update] Entropy: {entropy:.3f}, Target: {self.target_entropy:.3f}, dlogalpha: {-self.alpha_lr * entropy_error:.3f}, α: {self.alpha:.5f}")
+        # print(f"[Alpha Update] Entropy: {entropy:.3f}, Target: {self.target_entropy:.3f}, dlogalpha: {-self.alpha_lr * entropy_error:.3f}, α: {self.alpha:.5f}")
 
 #-------------------------------------------------------------
 #
@@ -322,7 +326,7 @@ class System:
             a_dim=self.a_dim,
             memory_capacity=memory_capacity,
             memory_e_capacity=memory_e_capacity,
-            lambda_h=0,
+            lambda_h=0.0,
             batch_size=batch_size,
             reward_scale=reward_scale,
             temperature=temperature,
@@ -394,9 +398,9 @@ class System:
 
             if remember:
                 if self.GAE:
-                    self.agent.memorize_e(event)
+                    self.agent.memorize_e(event.copy())
                 else:
-                    self.agent.memorize(event)
+                    self.agent.memorize(event.copy())
             
             state = np.copy(obs)
 
@@ -409,10 +413,10 @@ class System:
             self.agent.merge(De)
 
         if learn:
-            grad_steps = self.grad_steps if not self.GAE else 20#i+1
+            grad_steps = self.grad_steps if not self.GAE else 10#i+1
             for _ in range(0, grad_steps):
                 self.agent.learn()
-        
+
         return done, obs, r_interact, i+1
     
     def train_agent(self, total_steps, initialization=True):
@@ -469,11 +473,64 @@ class System:
         # Plot v_loss over training
         import matplotlib.pyplot as plt
         plt.figure()
-        plt.plot(self.agent.v_loss)
-        plt.xlabel('Episodes')
-        plt.ylabel('V Network Loss')
-        plt.title('Value Network Loss During Training')
+        log_v_loss = [np.log(loss) for loss in self.agent.v_loss]
+        plt.plot(log_v_loss)
+        plt.xlabel('Grad steps')
+        plt.ylabel('log(V Network Loss)')
+        plt.title('log(Value Network Loss) During Training')
         plt.savefig('v_loss.png')
         plt.close()
-        print("")     
+        print("")
+
+        # Plot episode total rewards over training
+        plt.figure()
+        rewards = [r["epsd_total_reward"] for r in results]
+        plt.plot(rewards)
+        plt.xlabel('Episodes')
+        plt.ylabel('Episode Total Reward')
+        plt.title('Episode Total Reward During Training')
+        plt.savefig('episode_rewards.png')
+        plt.close()
+
+        # Plot alpha, entropy, and critic1 loss over training
+        plt.figure()
+        log_alphas = [np.log(a) for a in self.agent.alpha_history]
+        entropies = self.agent.entropy_history
+        log_critic1_loss = [np.log(loss) for loss in self.agent.critic1_loss_history]
+
+        # Create figure with three y-axes
+        fig, ax1 = plt.subplots()
+
+        # Create second y-axis and plot entropy
+        ax2 = ax1.twinx()
+        color = 'tab:orange'
+        ax2.set_ylabel('Entropy (H)', color=color)
+        ax2.plot(entropies, color=color)
+        ax2.tick_params(axis='y', labelcolor=color)
+
+        # Create third y-axis and plot critic1 loss
+        ax3 = ax1.twinx()
+        ax3.spines['right'].set_position(('outward', 60))  # Offset the third axis
+        color = 'tab:green'
+        ax3.set_ylabel('log(Critic1 Loss)', color=color)
+        ax3.plot(log_critic1_loss, color=color)
+        ax3.tick_params(axis='y', labelcolor=color)
+        
+        # Plot log(alpha) on first y-axis
+        color = 'tab:blue'
+        ax1.set_xlabel('Grad steps')
+        ax1.set_ylabel('log(Alpha)', color=color)
+        ax1.plot(log_alphas, color=color)
+        ax1.tick_params(axis='y', labelcolor=color)
+
+        # Scale the y-axes to fill similar vertical space
+        ax1.set_ylim(min(log_alphas), max(log_alphas))
+        ax2.set_ylim(min(entropies), max(entropies))
+        ax3.set_ylim(min(log_critic1_loss), max(log_critic1_loss))
+
+        plt.title('Training Metrics')
+        fig.tight_layout()
+        plt.savefig('training_metrics.png')
+        plt.close()
+
         return results

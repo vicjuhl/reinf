@@ -313,26 +313,30 @@ class policyNet(nn.Module):
         return p
     
     def get_loss_SAC(self, llhood, q_off, w):
-        print(f"log pi: {llhood[0].item():.3f}\t| Q: {q_off[0].item():.3f}\t| diff: {(llhood - q_off)[0][0]:.3f}\t| w: {w[0].item():.3f}")
+        # print(f"log pi: {llhood[0].item():.3f}\t| Q: {q_off[0].item():.3f}\t| diff: {(llhood - q_off)[0][0]:.3f}\t| w: {w[0].item():.3f}")
         return torch.mean(w * (llhood - q_off))
     
     def get_loss_GAE(self, llhood, A, log_stdev, alpha, w):
-        A = (A - torch.mean(A)) / (torch.std(A) + 1e-8)
+        # print(f"Std A: {A.std().item():.3f}")
+        # print(A)
+
+        A = A / (torch.std(A) + 1e-2)
 
         # entropy_const = 0.5 * torch.log(2 * torch.pi * torch.exp(torch.tensor(1.0)))
         # entropy = torch.sum(entropy_const + log_stdev, dim=1)  # shape: (batch_size,)
         entropy = -llhood.mean()
 
-        log_pi = torch.squeeze(llhood)  # shape: (batch_size,)
+        log_pi = torch.clamp(torch.squeeze(llhood), -10, 5)  # shape: (batch_size,)
 
         total = A * log_pi + alpha * entropy  # shape: (batch_size,)
 
-        print(f"log pi:   {log_pi[0].item():.4f}",
-            f"\tH:      {log_stdev[0].mean().item():.4f}",
-            f"\tÂ:      {A[0].item():.4f}",
-            f"\tsum:    {total[0].item():.4f}",
-            f"\tw:      {w[0].item():.4f}")
+        # print(f"log pi: {log_pi[0].item():8.4f}",
+        #     f"\tH:      {-llhood.mean().item():8.4f}",
+        #     f"\talpha:  {alpha:8.4f}",
+        #     f"\tÂ:      {A[0].item():8.4f}",
+        #     f"\ttotal:  {total[0].item():8.4f}",
+        #     f"\tw:      {w[0].item():8.4f}")
 
-        return -torch.mean(w * total)
+        return -torch.mean(total)
         # return - torch.mean(w * (A * llhood))# + 10 * torch.sum(log_stdev,dim=1)))
         
