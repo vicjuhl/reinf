@@ -105,8 +105,9 @@ class Agent:
 
         #Weights for IS (not the most efficient way but whatever)
         self.w = torch.ones(batch_size)
-        self.threshold = 0.1
+        self.k = 0.01
         self.w_min = 0.1
+        self.w_max = 10
 
         updateNet(self.baseline_target, self.baseline, 1.0) 
 
@@ -131,16 +132,18 @@ class Agent:
         r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
         ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
 
-        na, log_stds = self.actor.sample_action_and_logstd(ns)
-        H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
+        # na, log_stds = self.actor.sample_action_and_logstd(ns)
+        # H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
 
-        q1 = self.critic1(ns, na)
-        q2 = self.critic2(ns, na)
+        # q1 = self.critic1(ns, na)
+        # q2 = self.critic2(ns, na)
 
         V = self.baseline(s)
+        V_target = self.baseline_target(ns)
         
 
-        delta_hat = r + self.gamma*(torch.min(q1,q2) + H) - V
+        # delta_hat = r + self.gamma*(torch.min(q1,q2) + H) - V
+        delta_hat = r + self.gamma*V_target - V
         delta_hat = delta_hat.detach().numpy()
 
         A = np.zeros(len(episode))
@@ -170,9 +173,10 @@ class Agent:
             with torch.no_grad():
                 p_old = torch.FloatTensor(batch[:,self.p_dim])
                 p_new = self.actor.get_prob(s_batch, a_batch)
-                self.w = p_new/(p_old + self.threshold)
+                self.w = p_new/(p_old + self.k)
                 self.w[self.w < self.w_min] = self.w_min            # floors the ratio (initialization messes w up)
-                # print(f'w = {self.w}')
+                self.w[self.w > self.w_max] = self.w_max            # Caps the ratio (just general differences in the density value)
+                # print(f'w_max = {torch.max(self.w)}')
 
 
         # Optimize q networks
@@ -196,8 +200,9 @@ class Agent:
         a_batch_off, llhood, log_stdev = self.actor.sample_action_and_llhood_and_logstdev(s_batch)                
         q1_off = self.critic1(s_batch, a_batch_off)
         q2_off = self.critic2(s_batch, a_batch_off)
-        q_off = torch.min(q1_off, q2_off)          
+        q_off = torch.min(q1_off, q2_off)  
         v_approx = q_off - self.alpha*llhood
+        # print(f'q_off = {q_off[0].item()}, llhood = {self.alpha*llhood[0].item()}')
 
         v_loss = self.baseline.get_loss(v, v_approx.detach(),self.w)
         self.baseline.optimizer.zero_grad()
@@ -207,9 +212,10 @@ class Agent:
         # Optimize policy network
         if self.GAE:
             A = torch.FloatTensor(batch[:,self.A_dim]).to(device)
-            pi_loss = self.actor.get_loss_GAE(llhood, A, log_stdev, self.w)
+            pi_loss = self.actor.get_loss_GAE(llhood, A, log_stdev, self.alpha, self.w)
         else:
             pi_loss = self.actor.get_loss_SAC(llhood, q_off, self.w)
+            
         
         self.actor.optimizer.zero_grad()
         pi_loss.backward()
@@ -227,7 +233,7 @@ class System:
     def __init__(
         self,
         alg,
-        memory_capacity = 200000,
+        memory_capacity = 2000,         #Gold fish
         env_steps=1,
         grad_steps=1,
         init_steps=256,
