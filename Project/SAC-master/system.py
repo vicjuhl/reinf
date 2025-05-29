@@ -94,7 +94,7 @@ class Agent:
         self.alpha = 1.0
         self.log_alpha = math.log(self.alpha)
         self.alpha_lr = 1e-3
-        self.target_entropy = 0#-a_dim
+        self.target_entropy = -a_dim
          
         self.memory = Memory(memory_capacity)
         self.memory_e = Memory(memory_e_capacity)
@@ -138,17 +138,18 @@ class Agent:
         r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
         ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
 
-        # na, log_stds = self.actor.sample_action_and_logstd(ns)
+        na, log_stds = self.actor.sample_action_and_logstd(ns)
         # H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
 
-        # q1 = self.critic1(ns, na)
-        # q2 = self.critic2(ns, na)
+        q1 = self.critic1(ns, na)
+        q2 = self.critic2(ns, na)
 
         V = self.baseline(s)
         V_hat = self.baseline_target(ns)
         
         # delta_hat = r + self.gamma*(torch.min(q1,q2)) + H - V
-        delta_hat = r + V_hat - V
+        delta_hat = r + self.gamma * V_hat - V
+        # delta_hat = r + self.gamma * torch.min(q1,q2) - V
         delta_hat = delta_hat.detach().numpy()
 
         A = np.zeros(len(episode))
@@ -180,7 +181,6 @@ class Agent:
                 self.w = p_new/(p_old + self.threshold)
                 self.w[self.w < self.w_min] = self.w_min            # floors the ratio (initialization messes w up)
                 # print(f'w = {self.w}')
-
 
         # Optimize q networks
         q1 = self.critic1(s_batch, a_batch)
@@ -478,7 +478,7 @@ class System:
         plt.xlabel('Grad steps')
         plt.ylabel('log(V Network Loss)')
         plt.title('log(Value Network Loss) During Training')
-        plt.savefig('v_loss.png')
+        plt.savefig('figures/v_loss.png')
         plt.close()
         print("")
 
@@ -489,7 +489,7 @@ class System:
         plt.xlabel('Episodes')
         plt.ylabel('Episode Total Reward')
         plt.title('Episode Total Reward During Training')
-        plt.savefig('episode_rewards.png')
+        plt.savefig('figures/episode_rewards.png')
         plt.close()
 
         # Plot alpha, entropy, and critic1 loss over training
@@ -502,35 +502,35 @@ class System:
         fig, ax1 = plt.subplots()
 
         # Create second y-axis and plot entropy
-        ax2 = ax1.twinx()
         color = 'tab:orange'
-        ax2.set_ylabel('Entropy (H)', color=color)
-        ax2.plot(entropies, color=color)
-        ax2.tick_params(axis='y', labelcolor=color)
-
-        # Create third y-axis and plot critic1 loss
-        ax3 = ax1.twinx()
-        ax3.spines['right'].set_position(('outward', 60))  # Offset the third axis
-        color = 'tab:green'
-        ax3.set_ylabel('log(Critic1 Loss)', color=color)
-        ax3.plot(log_critic1_loss, color=color)
-        ax3.tick_params(axis='y', labelcolor=color)
-        
-        # Plot log(alpha) on first y-axis
-        color = 'tab:blue'
-        ax1.set_xlabel('Grad steps')
-        ax1.set_ylabel('log(Alpha)', color=color)
-        ax1.plot(log_alphas, color=color)
+        ax1.set_ylabel('Entropy (H)', color=color)
+        ax1.plot(entropies, color=color, linewidth=0.7)
         ax1.tick_params(axis='y', labelcolor=color)
 
+        # Create third y-axis and plot critic1 loss
+        ax2 = ax1.twinx()
+        ax2.spines['right'].set_position(('outward', 60))  # Offset the third axis
+        color = 'tab:green'
+        ax2.set_ylabel('log(Critic1 Loss)', color=color)
+        ax2.plot(log_critic1_loss, color=color, linewidth=0.7)
+        ax2.tick_params(axis='y', labelcolor=color)
+        
+        # Plot log(alpha) on first y-axis
+        ax3 = ax1.twinx()
+        color = 'tab:blue'
+        ax3.set_xlabel('Grad steps')
+        ax3.set_ylabel('log(Alpha)', color=color)
+        ax3.plot(log_alphas, color=color)
+        ax3.tick_params(axis='y', labelcolor=color)
+
         # Scale the y-axes to fill similar vertical space
-        ax1.set_ylim(min(log_alphas), max(log_alphas))
-        ax2.set_ylim(min(entropies), max(entropies))
-        ax3.set_ylim(min(log_critic1_loss), max(log_critic1_loss))
+        ax1.set_ylim(min(entropies), max(entropies))
+        ax2.set_ylim(min(log_critic1_loss), max(log_critic1_loss))
+        ax3.set_ylim(min(log_alphas), max(log_alphas))
 
         plt.title('Training Metrics')
         fig.tight_layout()
-        plt.savefig('training_metrics.png')
+        plt.savefig('figures/training_metrics.png')
         plt.close()
 
         return results
