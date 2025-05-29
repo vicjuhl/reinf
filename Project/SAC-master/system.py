@@ -113,8 +113,9 @@ class Agent:
 
         #Weights for IS (not the most efficient way but whatever)
         self.w = torch.ones(batch_size)
-        self.threshold = 0.1
+        self.k = 1e-9
         self.w_min = 0.1
+        self.w_max = 10
 
         updateNet(self.baseline_target, self.baseline, 1.0) 
 
@@ -178,9 +179,8 @@ class Agent:
             with torch.no_grad():
                 p_old = torch.FloatTensor(batch[:,self.p_dim])
                 p_new = self.actor.get_prob(s_batch, a_batch)
-                self.w = p_new/(p_old + self.threshold)
-                self.w[self.w < self.w_min] = self.w_min            # floors the ratio (initialization messes w up)
-                # print(f'w = {self.w}')
+                self.w = p_new/(p_old + self.k)
+                self.w = torch.clamp(self.w, min=self.w_min, max=self.w_max)  # clamp importance sampling ratio
 
         # Optimize q networks
         q1 = self.critic1(s_batch, a_batch)
