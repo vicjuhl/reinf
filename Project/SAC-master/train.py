@@ -37,7 +37,7 @@ def run_env(proc_id, alg, system_type, reward_scale, punishment, total_steps, ep
         punishment=punishment,
         epsd_steps=epsd_steps,
         video_freq=None,#total_steps // 5, # TODO: will this begin videos in the middle of episodes?
-        memory_capacity=256*4,
+        memory_capacity=4 * 256,
         batch_size=256,
         proc_id=proc_id,
         GAE = GAE,
@@ -82,7 +82,7 @@ if __name__ == "__main__":
         all_results[proc_id] = results
 
     # Save to JSON in results directory
-    results_path = RESULTS_DIR / f'results_{system_type}_{alg}_{int(total_steps)}_{n_test}_{int(reward_scale)}_{int(punishment)}.json'
+    results_path = RESULTS_DIR / f'results_{system_type}_{"GAE" if GAE else "SAC"}_{int(total_steps)}_{n_test}_{int(reward_scale)}_{int(punishment)}{"_IS" if IS else ""}.json'
     with open(results_path, 'w') as f:
         json.dump(all_results, f, indent=2)
         print("Written results to json (safe to interrupt if needed)")

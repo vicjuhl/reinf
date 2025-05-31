@@ -93,7 +93,7 @@ class Agent:
         
         self.alpha = 1.0
         self.log_alpha = math.log(self.alpha)
-        self.alpha_lr = 1e-3
+        self.alpha_lr = 1e-2
         self.target_entropy = -a_dim
          
         self.memory = Memory(memory_capacity)
@@ -135,15 +135,8 @@ class Agent:
         self.memory_e.clean()
         episode = np.concatenate(episode,axis=0)
         s = torch.FloatTensor(episode[:,:self.s_dim]).to(device)
-        # a = torch.FloatTensor(episode[:,self.s_dim:self.sa_dim]).to(device)
         r = torch.FloatTensor(episode[:,self.sa_dim]).unsqueeze(1).to(device)
         ns = torch.FloatTensor(episode[:,self.sa_dim+1:self.sas_dim+1]).to(device)
-
-        na, log_stds = self.actor.sample_action_and_logstd(ns)
-        # H = 1/2 * torch.sum(2 * log_stds + torch.log(torch.Tensor([2*torch.pi*torch.exp(torch.tensor(1))])), dim=1,keepdim=True)
-
-        q1 = self.critic1(ns, na)
-        q2 = self.critic2(ns, na)
 
         V = self.baseline(s)
         V_hat = self.baseline_target(ns)
@@ -155,6 +148,8 @@ class Agent:
 
         A = np.zeros(len(episode))
         for i in range(len(episode)):
+            # delta_i affects all previous Â_t, less so, the further i is from t
+            # (gamlam is exponentially increasing and only the i-length tail is used)
             A[:i+1] += self.gamlam_v[-i-1:] * delta_hat[i][0]
 
         De = np.concatenate([episode,A.reshape(-1,1)],axis=1)
@@ -237,20 +232,12 @@ class Agent:
             llhood = llhood.detach().cpu().numpy()
         
         entropy = -llhood.mean()
-        # For Gaussian policy with tanh squashing, analytical entropy is:
-        # H = sum_i (log(2π) + 1)/2 + log_stdev_i
-        # This matches the entropy term in get_loss_GAE
-        # analytical_entropy = np.sum(1/2 * np.log(2*np.pi*np.exp(1)) + log_stdev.detach().cpu().numpy(), axis=1).mean()
-        # entropy = analytical_entropy
         entropy_error = entropy - self.target_entropy  # gradient of -alpha*(H + target)
 
-        # log_alpha gradient: d/d log_alpha = alpha * d/d alpha
-        # So we directly optimize: loss = -log_alpha * (H + target)
-        # Update log_alpha with gradient ascent
         self.log_alpha -= self.alpha_lr * entropy_error
 
         # Clamp log_alpha to a reasonable range
-        self.log_alpha = np.clip(self.log_alpha, np.log(1e-3), np.log(10))
+        self.log_alpha = np.clip(self.log_alpha, np.log(1e-3), np.log(100))
 
         # Get alpha from log_alpha
         self.alpha = float(np.exp(self.log_alpha))
@@ -326,7 +313,7 @@ class System:
             a_dim=self.a_dim,
             memory_capacity=memory_capacity,
             memory_e_capacity=memory_e_capacity,
-            lambda_h=0.0,
+            lambda_h=0.95,
             batch_size=batch_size,
             reward_scale=reward_scale,
             temperature=temperature,
@@ -413,7 +400,7 @@ class System:
             self.agent.merge(De)
 
         if learn:
-            grad_steps = self.grad_steps if not self.GAE else 10#i+1
+            grad_steps = self.grad_steps if not self.GAE else i//20 + 1
             for _ in range(0, grad_steps):
                 self.agent.learn()
 

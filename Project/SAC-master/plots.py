@@ -27,19 +27,32 @@ def add_alg_results_to_plot(system_name, alg, total_steps):
             total_rewards[proc_id].append(epsd_results["epsd_total_reward"])
             epsd_steps_actual[proc_id].append(epsd_results["final_step"] + 1)
 
-    # Calculate mean, min, and max across the 5 runs for each time step
-    # mean_values = np.mean(rewards, axis=0)
-    # min_values = np.min(rewards, axis=0)
-    # max_values = np.max(rewards, axis=0)
-
-    # time_steps = np.arange(len(mean_values))
-
     for proc_id in range(len(results)):
         r = total_rewards[proc_id]
         es = epsd_steps_actual[proc_id]
         acc_steps = np.cumsum(es)
         plt.plot(acc_steps, r, linewidth=0.5, alpha=0.5)
         # plt.fill_between(time_steps * epsd_steps, min_values, max_values, alpha=0.2)
+    # Calculate and plot mean across processes
+    max_len = max(len(r) for r in total_rewards)  # Get maximum length across all processes
+    mean_r = np.zeros(max_len)  # Initialize with maximum length
+    count = np.zeros(max_len)   # To handle different lengths
+    
+    # Accumulate rewards at each timestep
+    for proc_id in range(len(results)):
+        r = total_rewards[proc_id]
+        es = epsd_steps_actual[proc_id]
+        acc_steps = np.cumsum(es)
+        
+        # Only include up to length of this process
+        mean_r[:len(r)] += r
+        count[:len(r)] += 1
+    
+    # Calculate mean, avoiding divide by zero
+    mean_r = np.divide(mean_r, count, out=np.zeros_like(mean_r), where=count!=0)
+    
+    # Plot mean with thicker line
+    plt.plot(acc_steps, mean_r[:len(acc_steps)], linewidth=1.2, color='black')
 
 def add_epsd_len_to_plot(system_name, alg, total_steps):
     # Load JSON results
@@ -87,8 +100,10 @@ def plot_system(system_name, algs, total_steps):
     plt.savefig(PLOTS_DIR / f'{system_name}_epsd_len_plot.png', dpi=300, bbox_inches='tight')
     plt.close()
 
-# plot_system("Pendulum-v1", ["SAC", "SAC2"], 200)
-# plot_system("Hopper-v4", ["SAC"], int(5e5))
-# plot_system("HalfCheetah-v4", ["SAC"], int(5e5))
-# plot_system("Ant-v4", ["SAC"], int(5e5))
-plot_system("Pendulum-v1", ["SAC"], int(2e4))
+plot_system("Hopper-v4", ["SAC"], int(6e5))
+plot_system("HalfCheetah-v4", ["SAC"], int(6e5))
+plot_system("Ant-v4", ["SAC"], int(6e5))
+
+plot_system("Hopper-v4", ["GAE"], int(12e6))
+plot_system("HalfCheetah-v4", ["GAE"], int(12e6))
+plot_system("Ant-v4", ["GAE"], int(12e6))
