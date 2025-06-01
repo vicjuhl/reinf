@@ -211,7 +211,7 @@ class Agent:
         # Optimize policy network
         if self.GAE:
             A = torch.tensor(batch[:,self.A_dim], requires_grad=False).to(device)
-            pi_loss = self.actor.get_loss_GAE(llhood, A, log_stdev, self.alpha, self.w)
+            pi_loss = self.actor.get_loss_GAE(p_new, llhood, A, log_stdev, self.alpha, self.w)
         else:
             pi_loss = self.actor.get_loss_SAC(llhood, q_off, self.w)
 
@@ -313,7 +313,7 @@ class System:
             a_dim=self.a_dim,
             memory_capacity=memory_capacity,
             memory_e_capacity=memory_e_capacity,
-            lambda_h=0.95,
+            lambda_h=0.0,
             batch_size=batch_size,
             reward_scale=reward_scale,
             temperature=temperature,
