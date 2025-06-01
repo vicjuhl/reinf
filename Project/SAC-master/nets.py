@@ -304,28 +304,38 @@ class policyNet(nn.Module):
         '''
         Get the probability for the a given s.
         '''
-        if m==None:
+        if m is None:
             m, log_stdev = self(s)
         
-        u = torch.atanh(a)
-        x = (u-m)/log_stdev
-        p = torch.exp(torch.sum(self.normal.log_prob(x),dim=-1))
-        return p
+        # Clamp a to avoid infinite/undefined atanh values at ±1
+        a_clamped = torch.clamp(a, -0.999999, 0.999999)
+        u = torch.atanh(a_clamped)
+        x = (u-m)/(log_stdev + 1e-9)
+        if torch.isnan(x).any():
+            p = torch.ones(x.shape[0])
+            return p
+        log_p = torch.sum(self.normal.log_prob(x),dim=-1)
+        # print("u", u)
+        # print("x", x)
+        # print("logp", log_p)
+        return log_p
     
     def get_loss_SAC(self, llhood, q_off, w):
         # print(f"log pi: {llhood[0].item():.3f}\t| Q: {q_off[0].item():.3f}\t| diff: {(llhood - q_off)[0][0]:.3f}\t| w: {w[0].item():.3f}")
         return torch.mean(w * (llhood - q_off))
     
-    def get_loss_GAE(self, p_new, llhood, A, log_stdev, alpha, w):
+    def get_loss_GAE(self, log_p_new, llhood, A, log_stdev, alpha, w):
         A = A / (torch.std(A) + 1e-2)
         
         entropy = -llhood.mean()
 
-        log_pi = torch.clamp(torch.squeeze(torch.log(p_new)), -10, 5)  # shape: (batch_size,)
+        # log_pi = torch.clamp(torch.squeeze(torch.log(p_new)), -10, 5)  # shape: (batch_size,)
+        # log_pi = torch.log(p_new)
+        # Check for NaN values in p_new
 
-        total = A * log_pi + alpha * entropy  # shape: (batch_size,)
+        total = A * log_p_new + alpha * entropy  # shape: (batch_size,)
 
-        # print(f"log pi: {-log_pi[0].item():8.4f}",
+        # print(f"-log pi:{-log_p_new[0].item():8.4f}",
         #     f"\tH:      {-llhood.mean().item():8.4f}",
         #     f"\talpha:  {alpha:8.4f}",
         #     f"\tÂ:      {A[0].item():8.4f}",

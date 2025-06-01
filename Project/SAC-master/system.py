@@ -171,11 +171,10 @@ class Agent:
         ns_batch = torch.FloatTensor(batch[:,self.sa_dim+1:self.sa_dim+1+self.s_dim]).to(device)
 
         if self.IS:
-            with torch.no_grad():
-                p_old = torch.FloatTensor(batch[:,self.p_dim])
-                p_new = self.actor.get_prob(s_batch, a_batch)
-                self.w = p_new/(p_old + self.k)
-                self.w = torch.clamp(self.w, min=self.w_min, max=self.w_max)  # clamp importance sampling ratio
+            p_old = torch.FloatTensor(batch[:,self.p_dim])
+            log_p_new = self.actor.get_prob(s_batch, a_batch)
+            self.w = torch.exp(log_p_new).detach()/(p_old.detach() + self.k)
+            self.w = torch.clamp(self.w, min=self.w_min, max=self.w_max)  # clamp importance sampling ratio
 
         # Optimize q networks
         q1 = self.critic1(s_batch, a_batch)
@@ -211,7 +210,7 @@ class Agent:
         # Optimize policy network
         if self.GAE:
             A = torch.tensor(batch[:,self.A_dim], requires_grad=False).to(device)
-            pi_loss = self.actor.get_loss_GAE(p_new, llhood, A, log_stdev, self.alpha, self.w)
+            pi_loss = self.actor.get_loss_GAE(log_p_new, llhood, A, log_stdev, self.alpha, self.w)
         else:
             pi_loss = self.actor.get_loss_SAC(llhood, q_off, self.w)
 
@@ -313,7 +312,7 @@ class System:
             a_dim=self.a_dim,
             memory_capacity=memory_capacity,
             memory_e_capacity=memory_e_capacity,
-            lambda_h=0.0,
+            lambda_h=0.5,
             batch_size=batch_size,
             reward_scale=reward_scale,
             temperature=temperature,
@@ -338,13 +337,13 @@ class System:
             if self.IS:
                 cuda_action = torch.FloatTensor(action).to(device)
                 cuda_state = torch.FloatTensor(state).to(device)
-                p = self.agent.actor.get_prob(cuda_state,cuda_action)
-                event[self.p_dim] = p
+                log_p = self.agent.actor.get_prob(cuda_state,cuda_action)
+                event[self.p_dim] = torch.exp(log_p)
 
             if self.GAE:
-                self.agent.memorize_e(event)
+                self.agent.memorize_e(event.copy())
             else:
-                self.agent.memorize(event)
+                self.agent.memorize(event.copy())
             
             state = np.copy(next_state)
         
