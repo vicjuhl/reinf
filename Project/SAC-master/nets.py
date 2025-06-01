@@ -323,7 +323,7 @@ class policyNet(nn.Module):
 
         log_pi = torch.clamp(torch.squeeze(torch.log(p_new)), -10, 5)  # shape: (batch_size,)
 
-        total = A * log_pi * 10 + alpha * entropy  # shape: (batch_size,)
+        total = A * log_pi + alpha * entropy  # shape: (batch_size,)
 
         # print(f"log pi: {-log_pi[0].item():8.4f}",
         #     f"\tH:      {-llhood.mean().item():8.4f}",
